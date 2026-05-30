@@ -22,33 +22,117 @@ backend/      # Python FastAPI backend
 These must be installed on your machine before the project will run:
 
 - **Node.js 20+** — [download here](https://nodejs.org/)
+- **npm** (comes with Node.js) or **pnpm** if you prefer
 - **Python 3.14+** — [download here](https://www.python.org/downloads/)
 - **MongoDB** — either run it locally ([install guide](https://www.mongodb.com/docs/manual/installation/)) or use a free cloud instance at [MongoDB Atlas](https://www.mongodb.com/atlas)
 
-### Frontend
+> If `npm install` fails in `web/`, make sure your Node version is 20 or newer. You can check with:
+>
+> ```bash
+> node -v
+> npm -v
+> ```
 
-shadcn/ui and Tremor are already included as npm dependencies — no extra install needed.
+### Frontend setup
 
-```bash
-cd web
-npm install
-npm run dev
-```
+1. Open a terminal and navigate to the frontend folder:
 
-The frontend runs on [http://localhost:3000](http://localhost:3000).
+    ```bash
+    cd web
+    ```
 
-### Backend
+2. Install frontend dependencies:
 
-```bash
-cd backend
-cp .env.example .env           # Configure your MongoDB connection string
-source venv/bin/activate       # Activate the virtual environment
-uvicorn app.main:app --reload
-```
+    ```bash
+    npm install
+    ```
 
-The API runs on [http://localhost:8000](http://localhost:8000) with docs at [http://localhost:8000/docs](http://localhost:8000/docs).
+    If you see dependency resolution errors, try:
 
-**Note:** The backend will start even without MongoDB running, but you'll see a warning. Database routes won't work until MongoDB is available.
+    ```bash
+    npm install --legacy-peer-deps
+    ```
+
+3. Start the development server:
+
+    ```bash
+    npm run dev
+    ```
+
+4. Open the app in your browser at:
+
+    ```text
+    http://localhost:3000
+    ```
+
+### Backend setup
+
+1. Open a terminal and navigate to the backend folder:
+
+    ```bash
+    cd backend
+    ```
+
+2. Create a Python virtual environment (if one does not already exist):
+
+    ```bash
+    python3 -m venv venv
+    ```
+
+3. Activate the virtual environment:
+
+    ```bash
+    source venv/bin/activate
+    ```
+
+4. Install backend Python dependencies:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+5. Copy the example environment file and configure your MongoDB connection:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+6. Start the FastAPI server:
+
+    ```bash
+    uvicorn app.main:app --reload
+    ```
+
+7. Verify the backend is running:
+
+    ```text
+    http://localhost:8000
+    ```
+
+    API docs are available at:
+
+    ```text
+    http://localhost:8000/docs
+    ```
+
+### Recommended order
+
+1. Start MongoDB or configure MongoDB Atlas.
+2. Run the backend:
+
+    ```bash
+    cd backend
+    source venv/bin/activate
+    uvicorn app.main:app --reload
+    ```
+
+3. Run the frontend:
+
+    ```bash
+    cd web
+    npm install
+    npm run dev
+    ```
 
 ## License
 
