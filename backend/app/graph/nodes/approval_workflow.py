@@ -80,11 +80,22 @@ async def approval_workflow_node(state: GraphState) -> dict[str, Any]:
     employee_context = await _fetch_employee_context(txn.get("employee", ""))
     dept_context = await _fetch_department_context(txn.get("department", ""))
 
+    compliance_results = state.get("compliance_results", {}).get(txn_id, {})
+
+    # Derive recommendation from compliance results if not already set
+    if not compliance_results.get("recommendation"):
+        if compliance_results.get("status") == "Violation":
+            compliance_results["recommendation"] = "Decline"
+        elif compliance_results.get("status") == "Compliant":
+            compliance_results["recommendation"] = "Approve"
+        else:
+            compliance_results["recommendation"] = txn.get("recommendation", "Approve")
+
     approval_packet = {
         "transaction_id": txn_id,
         "transaction": txn,
         "status": "pending",
-        "compliance_results": state.get("compliance_results", {}).get(txn_id, {}),
+        "compliance_results": compliance_results,
         "employee_context": employee_context,
         "department_context": dept_context,
     }
@@ -105,23 +116,56 @@ async def approval_workflow_node(state: GraphState) -> dict[str, Any]:
 
 
 async def resume_approval(transaction_id: str, approved: bool) -> dict[str, Any]:
-    """Resume the approval workflow with a manager decision."""
+    """Resume the approval workflow with a manager decision.
+
+    Preserves the AI's recommendation (from compliance_results) on the transaction
+    as `ai_recommendation`, separate from the human's `approval_status` decision.
+    """
     status = "approved" if approved else "denied"
 
     # Check in-memory store first
     packet = _pending_approvals.get(transaction_id)
     if packet:
+        ai_recommendation = (
+            packet.get("compliance_results", {}).get("recommendation")
+            or packet.get("transaction", {}).get("recommendation")
+        )
         packet["status"] = status
         packet["transaction"]["approval_status"] = status
         del _pending_approvals[transaction_id]
+
+        try:
+            from app.core.database import get_collection
+            collection = await get_collection("transactions")
+            update: dict[str, Any] = {
+                "approval_status": status,
+            }
+            if ai_recommendation:
+                update["ai_recommendation"] = ai_recommendation
+            await collection.update_one(
+                {"transaction_id": transaction_id},
+                {"$set": update},
+            )
+        except Exception as e:
+            return {"error": f"Database error: {str(e)}"}
     else:
         # Not in memory — update directly in DB
         try:
             from app.core.database import get_collection
             collection = await get_collection("transactions")
+            # Read the existing recommendation to preserve it as ai_recommendation
+            existing = await collection.find_one(
+                {"transaction_id": transaction_id},
+                {"recommendation": 1},
+            )
+            update: dict[str, Any] = {
+                "approval_status": status,
+            }
+            if existing and existing.get("recommendation"):
+                update["ai_recommendation"] = existing["recommendation"]
             result = await collection.update_one(
                 {"transaction_id": transaction_id},
-                {"$set": {"approval_status": status}},
+                {"$set": update},
             )
             if result.matched_count == 0:
                 return {"error": f"No pending approval found for {transaction_id}"}

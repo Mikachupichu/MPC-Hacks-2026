@@ -7,6 +7,8 @@ import {
   Text,
   Button,
   Badge,
+  Select,
+  SelectItem,
   Table,
   TableBody,
   TableCell,
@@ -18,11 +20,19 @@ import { toast } from "sonner";
 import RulesForm from "@/components/RulesForm";
 import ApprovalPanel from "@/components/ApprovalPanel";
 import TransactionForm from "@/components/TransactionForm";
-import { scanCompliance, listRules, getTransactionCodes } from "@/lib/api";
+import { scanCompliance, listRules, getTransactionCodes, getTimeRange, setTimeRange } from "@/lib/api";
 import type { ComplianceRule, TransactionCode } from "@/lib/types";
-import { Shield, Plus, List } from "lucide-react";
+import { Shield, Plus, List, Clock } from "lucide-react";
 
 type TabView = "rules" | "add-txn";
+
+const TIME_RANGE_OPTIONS = [
+  { value: 1, label: "Past 1 Month" },
+  { value: 2, label: "Past 2 Months" },
+  { value: 4, label: "Past 4 Months" },
+  { value: 8, label: "Past 8 Months" },
+  { value: 12, label: "Past Year" },
+];
 
 export default function AdminPage() {
   const [rules, setRules] = useState<ComplianceRule[]>([]);
@@ -32,6 +42,7 @@ export default function AdminPage() {
     violations_found: number;
   } | null>(null);
   const [activeTab, setActiveTab] = useState<TabView>("rules");
+  const [timeRangeMonths, setTimeRangeMonths] = useState(12);
 
   const fetchRules = async () => {
     try {
@@ -43,6 +54,21 @@ export default function AdminPage() {
   useEffect(() => {
     fetchRules();
   }, []);
+
+  useEffect(() => {
+    getTimeRange().then((data) => setTimeRangeMonths(data.months)).catch(() => {});
+  }, []);
+
+  const handleTimeRangeChange = async (months: string) => {
+    const value = parseInt(months, 10);
+    setTimeRangeMonths(value);
+    try {
+      await setTimeRange(value);
+      toast.success(`Time range updated to ${TIME_RANGE_OPTIONS.find((o) => o.value === value)?.label}`);
+    } catch {
+      toast.error("Failed to save time range");
+    }
+  };
 
   const handleScan = async () => {
     setScanning(true);
@@ -70,6 +96,33 @@ export default function AdminPage() {
           Manage expense policies, create custom rules, add transactions, scan for compliance, and approve transactions.
         </Text>
       </div>
+
+      {/* Time Range Selector */}
+      <Card>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Clock className="h-5 w-5 text-gray-500" />
+            <div>
+              <Title>Data Time Range</Title>
+              <Text className="mt-1">
+                Transactions outside this range are frozen and excluded from compliance scans, new rules, and reports.
+              </Text>
+            </div>
+          </div>
+          <div className="w-56">
+            <Select
+              value={String(timeRangeMonths)}
+              onValueChange={handleTimeRangeChange}
+            >
+              {TIME_RANGE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={String(opt.value)}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+        </div>
+      </Card>
 
       {/* Compliance Scan */}
       <Card>

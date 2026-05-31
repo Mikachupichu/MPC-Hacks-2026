@@ -35,9 +35,12 @@ Respond with a JSON array:
     "transaction_id": "str",
     "status": "Compliant" or "Violation",
     "severity": "Low" or "Medium" or "High",
+    "recommendation": "Approve" or "Decline",
     "reasoning": "Specific explanation"
   }}
 ]
+
+IMPORTANT: The "recommendation" field is the AI agent's independent recommendation — set it to "Approve" for Compliant transactions and "Decline" for Violations. Do NOT include the recommendation text inside the reasoning field.
 """
 
 
@@ -221,8 +224,10 @@ def _default_compliance(transaction: dict, error: str = "") -> dict:
         "transaction_id": str(txn_id),
         "status": "Compliant",
         "severity": "Low",
+        "recommendation": "Approve",
         "reasoning": "Unable to evaluate with AI - manual review recommended.",
     }
     if error:
+        result["recommendation"] = "Approve"
         result["reasoning"] = f"Evaluation error: {error}"
     return result

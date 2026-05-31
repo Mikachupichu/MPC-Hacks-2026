@@ -175,20 +175,21 @@ export default function LogsPage() {
                 <TableHeaderCell>Employee</TableHeaderCell>
                 <TableHeaderCell>Dept</TableHeaderCell>
                 <TableHeaderCell>Type</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>AI Rec.</TableHeaderCell>
+                <TableHeaderCell>Approval</TableHeaderCell>
                 <TableHeaderCell>Reasoning</TableHeaderCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8">
+                  <TableCell colSpan={10} className="text-center py-8">
                     <Text>Loading transactions...</Text>
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8">
+                  <TableCell colSpan={10} className="text-center py-8">
                     <Text>No transactions found matching your filters.</Text>
                   </TableCell>
                 </TableRow>
@@ -218,11 +219,20 @@ export default function LogsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        {txn.recommendation ? (
+                          <Badge size="xs" color={txn.recommendation === "Approve" ? "emerald" : txn.recommendation === "Decline" ? "red" : "yellow"}>
+                            {txn.recommendation}
+                          </Badge>
+                        ) : (
+                          <Badge size="xs" color="gray">—</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <Badge size="xs" color={STATUS_COLORS[txn.approval_status] || "gray"}>
                           {txn.approval_status === "not_required" ? "Not Required" : txn.approval_status.charAt(0).toUpperCase() + txn.approval_status.slice(1)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="max-w-[280px] text-xs text-gray-500" title={txn.reasoning || ""}>
+                      <TableCell className="max-w-[260px] text-xs text-gray-500" title={txn.reasoning || ""}>
                         <span className="truncate block">
                           {txn.reasoning ?? "—"}
                         </span>

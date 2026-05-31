@@ -12,25 +12,35 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+const REQUEST_TIMEOUT = 30_000; // 30 seconds
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
   const url = `${API_BASE}/api${path}`;
-  const res = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-    ...options,
-  });
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+      signal: controller.signal,
+      ...options,
+    });
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`API error ${res.status}: ${error}`);
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`API error ${res.status}: ${error}`);
+    }
+
+    return res.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return res.json();
 }
 
 // Feature 1: Chat
@@ -166,4 +176,16 @@ export async function getTransactionTypes(): Promise<{
   types: TransactionType[];
 }> {
   return request("/transactions/types");
+}
+
+// App-wide settings
+export async function getTimeRange(): Promise<{ months: number }> {
+  return request("/settings/time-range");
+}
+
+export async function setTimeRange(months: number): Promise<{ months: number }> {
+  return request("/settings/time-range", {
+    method: "PUT",
+    body: JSON.stringify({ months }),
+  });
 }

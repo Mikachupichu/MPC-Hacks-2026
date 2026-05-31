@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
+from app.core.time_range import get_app_cutoff_date
 from app.graph.state import GraphState
 
 try:
@@ -35,12 +36,16 @@ async def report_compiler_node(state: GraphState) -> dict[str, Any]:
                 "transaction_id": txn_id,
                 "status": "Violation" if is_violation else "Compliant",
                 "severity": "High" if is_violation else "Low",
+                "recommendation": txn.get("recommendation"),
                 "reasoning": reasoning or "",
             }
 
         # Double-check a sample of approved and denied transactions against policy
-        approved_sample = [t for t in transactions if t.get("approval_status") == "approved"][:10]
-        denied_sample = [t for t in transactions if t.get("approval_status") == "denied"][:10]
+        # Only include transactions within the app-wide time range — older ones are frozen
+        cutoff = await get_app_cutoff_date()
+        audit_candidates = [t for t in transactions if str(t.get("date", "")) >= cutoff]
+        approved_sample = [t for t in audit_candidates if t.get("approval_status") == "approved"][:10]
+        denied_sample = [t for t in audit_candidates if t.get("approval_status") == "denied"][:10]
         audit_sample = (approved_sample + denied_sample)[:10]
         if audit_sample:
             from app.core.database import get_collection
@@ -48,39 +53,25 @@ async def report_compiler_node(state: GraphState) -> dict[str, Any]:
             for txn_id, result in audit_results.items():
                 if txn_id in compliance_results:
                     compliance_results[txn_id] = result
-                    # If AI changed its mind, update in DB too
                     for txn in audit_sample:
                         if txn.get("transaction_id") == txn_id:
                             old_status = txn.get("approval_status", "")
-                            new_rec = result.get("reasoning", "")
-                            # Check if the new recommendation contradicts the old status
-                            if old_status == "approved" and "Recommendation: Pending" in new_rec:
+                            new_rec = result.get("recommendation")
+                            new_reasoning = result.get("reasoning", "")
+                            if new_rec and new_rec != "Approve" and old_status == "approved":
+                                # AI changed its mind — flip to pending
                                 collection = await get_collection("transactions")
                                 await collection.update_one(
                                     {"transaction_id": txn_id},
-                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
-                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "Medium", "reasoning": f"Audit: previously approved but new recommendation flags for review."}}}
+                                    {"$set": {"approval_status": "pending", "recommendation": new_rec, "reasoning": new_reasoning},
+                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously approved but now recommends {new_rec}."}}}
                                 )
-                            elif old_status == "approved" and "Recommendation: Decline" in new_rec:
+                            elif new_rec and new_rec != "Decline" and old_status == "denied":
                                 collection = await get_collection("transactions")
                                 await collection.update_one(
                                     {"transaction_id": txn_id},
-                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
-                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously approved but now recommended to decline."}}}
-                                )
-                            elif old_status == "denied" and "Recommendation: Pending" in new_rec:
-                                collection = await get_collection("transactions")
-                                await collection.update_one(
-                                    {"transaction_id": txn_id},
-                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
-                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "Medium", "reasoning": f"Audit: previously denied but new recommendation flags for re-review."}}}
-                                )
-                            elif old_status == "denied" and "Recommendation: Approve" in new_rec:
-                                collection = await get_collection("transactions")
-                                await collection.update_one(
-                                    {"transaction_id": txn_id},
-                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
-                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "Low", "reasoning": f"Audit: previously denied but now recommended for approval."}}}
+                                    {"$set": {"approval_status": "pending", "recommendation": new_rec, "reasoning": new_reasoning},
+                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously denied but now recommends {new_rec}."}}}
                                 )
                             break
 
@@ -96,6 +87,7 @@ async def report_compiler_node(state: GraphState) -> dict[str, Any]:
                 "department": t.get("department", ""),
                 "transaction_type": t.get("transaction_type", ""),
                 "date": str(t.get("date", "")),
+                "recommendation": t.get("recommendation"),
                 "reasoning": t.get("reasoning", ""),
             }
             for t in transactions
@@ -189,6 +181,8 @@ async def _audit_transactions(transactions: list[dict]) -> dict[str, dict[str, A
                 "transaction_type": t.get("transaction_type", ""),
                 "current_status": t.get("approval_status", ""),
                 "current_reasoning": t.get("reasoning", ""),
+                "current_recommendation": t.get("recommendation"),
+                "current_status": t.get("approval_status", ""),
             }
             for t in transactions
         ]
@@ -197,11 +191,12 @@ async def _audit_transactions(transactions: list[dict]) -> dict[str, dict[str, A
             "You are a policy auditor double-checking expense transactions. "
             "Review each transaction against standard expense policy (all expenses over $50 need receipts, "
             "transactions over $2000 need approval, any transaction over $10000 needs CFO approval).\n\n"
-            "For each transaction, decide if the current status and reasoning are still correct. "
-            "If you disagree with the previous decision, set status to 'Violation' and explain why.\n\n"
-            "Respond with a JSON array. Only include transactions where you disagree with the previous decision:\n"
+            "For each transaction, decide if the current decision was correct. "
+            "If you disagree, set status to 'Violation' and provide your new recommendation.\n\n"
+            "Respond with a JSON array. Only include transactions where you disagree:\n"
             "[{\"transaction_id\":\"...\", \"status\":\"Violation\", \"severity\":\"Low\"|\"Medium\"|\"High\", "
-            "\"reasoning\":\"Recommendation: Pending — <explanation of why the previous decision was wrong>\"}]\n\n"
+            "\"recommendation\":\"Approve\"|\"Decline\", "
+            "\"reasoning\":\"<explanation of why the previous decision was wrong>\"}]\n\n"
             "Return [] if all decisions are correct."
         )
 
@@ -221,7 +216,8 @@ async def _audit_transactions(transactions: list[dict]) -> dict[str, dict[str, A
                             "transaction_id": tid,
                             "status": "Violation",
                             "severity": item.get("severity", "Medium"),
-                            "reasoning": item.get("reasoning", "Recommendation: Pending — Re-evaluated and flagged."),
+                            "recommendation": item.get("recommendation", "Decline"),
+                            "reasoning": item.get("reasoning", "Re-evaluated and flagged."),
                         }
             except json.JSONDecodeError:
                 pass
