@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button, TextInput, Title, Text } from "@tremor/react";
 import { Send, Loader2 } from "lucide-react";
+import AeroWindow from "@/components/AeroWindow";
 import ChatMessage from "@/components/ChatMessage";
 import { sendChatMessage } from "@/lib/api";
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
@@ -79,53 +80,58 @@ export default function ChatDashboard() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-5xl mx-auto w-full px-4">
-      <div className="flex items-center justify-between py-4 border-b border-gray-200 dark:border-gray-700">
-        <div>
-          <Title>Talk to Your Data</Title>
-          <Text>Ask questions about your company spending in plain English</Text>
-        </div>
-        {conversationId && (
-          <Button variant="secondary" size="xs" onClick={handleNewConversation}>
-            New Conversation
-          </Button>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto py-4 space-y-4">
-        {messages.map((msg, i) => (
-          <ChatMessage key={i} message={msg} />
-        ))}
-
-        {loading && (
-          <div className="flex items-center gap-2 text-gray-500 pl-10">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <Text>Thinking...</Text>
+    <div className="w-full min-h-[calc(100vh-4rem)] px-4 py-6 flex flex-col">
+      <AeroWindow title="Chat" className="mx-auto w-full">
+        <div className="flex h-full max-h-[calc(100vh-12rem)] w-full flex-col overflow-hidden">
+          <div className="flex items-center justify-between py-4 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <Title>Talk to Your Data</Title>
+              <Text>Ask questions about your company spending in plain English</Text>
+            </div>
+            {conversationId && (
+              <Button variant="secondary" size="xs" onClick={handleNewConversation}>
+                New Conversation
+              </Button>
+            )}
           </div>
-        )}
 
-        <div ref={messagesEndRef} />
-      </div>
+          <div className="flex-1 overflow-y-auto py-4 space-y-4">
+            {messages.map((msg, i) => (
+              <ChatMessage key={i} message={msg} />
+            ))}
 
-      <div className="py-4 border-t border-gray-200 dark:border-gray-700">
-        <div className="flex gap-2">
-          <TextInput
-            placeholder="Ask about your expenses..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={loading}
-            className="flex-1"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-            icon={Send}
-          >
-            Send
-          </Button>
+            {loading && (
+              <div className="flex items-center gap-2 text-gray-500 pl-10">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <Text>Thinking...</Text>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="py-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex gap-2 items-end py-1">
+              <TextInput
+                placeholder="Ask about your expenses..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={loading}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleSend}
+                disabled={loading || !input.trim()}
+                icon={Send}
+                className="frutiger-aero-button"
+              >
+                Send
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
+      </AeroWindow>
     </div>
   );
 }

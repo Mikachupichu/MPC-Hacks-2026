@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import RulesForm from "@/components/RulesForm";
 import ApprovalPanel from "@/components/ApprovalPanel";
 import TransactionForm from "@/components/TransactionForm";
+import AeroWindow from "@/components/AeroWindow";
 import { scanCompliance, listRules, getTransactionCodes } from "@/lib/api";
 import type { ComplianceRule, TransactionCode } from "@/lib/types";
 import { Shield, Plus, List } from "lucide-react";
@@ -63,16 +64,17 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-      <div>
-        <Title>Admin: Policy & Approval Center</Title>
-        <Text>
-          Manage expense policies, create custom rules, add transactions, scan for compliance, and approve transactions.
-        </Text>
-      </div>
+    <div className="w-full px-4 py-8">
+      <AeroWindow title="Admin: Policy & Approval Center" className="mx-auto">
+        <div className="space-y-8">
+          <div>
+            <Text>
+              Manage expense policies, create custom rules, add transactions, scan for compliance, and approve transactions.
+            </Text>
+          </div>
 
-      {/* Compliance Scan */}
-      <Card>
+          {/* Compliance Scan */}
+      <Card className="p-4">
         <div className="flex items-center justify-between">
           <div>
             <Title>Compliance Scan</Title>
@@ -138,7 +140,7 @@ export default function AdminPage() {
         <div className="space-y-6">
           <RulesForm onRuleCreated={fetchRules} />
 
-          <Card>
+          <Card className="p-4">
             <Title>Existing Rules ({rules.length})</Title>
             <Table className="mt-4">
               <TableHead>
@@ -199,10 +201,12 @@ export default function AdminPage() {
       )}
 
       {activeTab === "add-txn" && (
-        <Card>
+        <Card className="p-4">
           <TransactionForm />
         </Card>
       )}
+        </div>
+      </AeroWindow>
     </div>
   );
 }

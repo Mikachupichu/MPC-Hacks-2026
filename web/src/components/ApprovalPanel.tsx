@@ -52,7 +52,7 @@ export default function ApprovalPanel() {
   };
 
   return (
-    <Card className={approvals.length > 0 ? "ring-2 ring-amber-400 dark:ring-amber-600" : ""}>
+    <Card className={approvals.length > 0 ? "ring-2 ring-amber-400 dark:ring-amber-600" : "" + " p-4"}>
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="flex w-full items-center justify-between text-left"

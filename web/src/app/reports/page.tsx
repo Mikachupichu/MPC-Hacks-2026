@@ -7,16 +7,16 @@ import {
   Text,
   Button,
   Badge,
-  Select,
-  SelectItem,
   Grid,
   Metric,
   Col,
 } from "@tremor/react";
+import Dropdown, { DropdownItem } from "@/components/Dropdown";
 import { toast } from "sonner";
 import VisualBubble from "@/components/VisualBubble";
 import { compileReport, getDepartments } from "@/lib/api";
 import type { ReportPayload } from "@/lib/types";
+import AeroWindow from "@/components/AeroWindow";
 import { FileText, Loader2 } from "lucide-react";
 
 export default function ReportsPage() {
@@ -66,28 +66,31 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <Title>Expense Reports</Title>
-          <Text>
-            Generate comprehensive, corporate-ready financial reports from your expense data.
-          </Text>
-        </div>
-      </div>
+    <div className="w-full px-4 py-8">
+      <AeroWindow title="Expense Report" className="mx-auto">
+        <div className="space-y-8 overflow-hidden">
+          <div className="overflow-y-auto max-h-[70vh] space-y-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <Title>Expense Reports</Title>
+                <Text>
+                  Generate comprehensive, corporate-ready financial reports from your expense data.
+                </Text>
+              </div>
+            </div>
 
-      {/* Report Controls */}
-      <Card>
-        <div className="flex items-end gap-4">
+            {/* Report Controls */}
+      <Card className="p-4">
+            <div className="flex items-end gap-4">
           <div className="flex-1">
             <label className="block text-sm font-medium mb-1">Department</label>
-            <Select value={department} onValueChange={setDepartment}>
+            <Dropdown value={department} onValueChange={setDepartment} placeholder="All Departments">
               {departments.map((d) => (
-                <SelectItem key={d} value={d}>
+                <DropdownItem key={d} value={d}>
                   {d === "all" ? "All Departments" : d}
-                </SelectItem>
+                </DropdownItem>
               ))}
-            </Select>
+            </Dropdown>
           </div>
           <Button
             icon={loading ? Loader2 : FileText}
@@ -267,6 +270,9 @@ export default function ReportsPage() {
           )}
         </>
       )}
-    </div>
+        </div>
+      </div>
+    </AeroWindow>
+  </div>
   );
 }

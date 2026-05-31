@@ -6,10 +6,9 @@ import {
   Title,
   Text,
   Button,
-  Select,
-  SelectItem,
   Textarea,
 } from "@tremor/react";
+import Dropdown, { DropdownItem } from "@/components/Dropdown";
 import { toast } from "sonner";
 import { createRule } from "@/lib/api";
 import type { ComplianceRule } from "@/lib/types";
@@ -66,7 +65,7 @@ export default function RulesForm({ onRuleCreated }: RulesFormProps) {
   };
 
   return (
-    <Card>
+    <Card className="p-4">
       <Title>Create Custom Spending Rule</Title>
       <Text className="mt-1">
         Rules target specific departments and transaction types. The transaction code is auto-assigned from the department.
@@ -86,35 +85,35 @@ export default function RulesForm({ onRuleCreated }: RulesFormProps) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Department</label>
-            <Select value={department} onValueChange={setDepartment}>
+            <Dropdown value={department} onValueChange={setDepartment} placeholder="All Departments">
               {DEPARTMENTS.map((d) => (
-                <SelectItem key={d.value} value={d.value}>
+                <DropdownItem key={d.value} value={d.value}>
                   {d.label}
-                </SelectItem>
+                </DropdownItem>
               ))}
-            </Select>
+            </Dropdown>
           </div>
 
           <div>
             <label className="block text-sm font-medium mb-1">Transaction Type / Category</label>
-            <Select value={category} onValueChange={setCategory}>
+            <Dropdown value={category} onValueChange={setCategory} placeholder="All Types">
               {TYPE_OPTIONS.map((t) => (
-                <SelectItem key={t} value={t}>
+                <DropdownItem key={t} value={t}>
                   {t === "all" ? "All Types" : t}
-                </SelectItem>
+                </DropdownItem>
               ))}
-            </Select>
+            </Dropdown>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Severity</label>
-            <Select value={severity} onValueChange={setSeverity}>
-              <SelectItem value="Low">Low</SelectItem>
-              <SelectItem value="Medium">Medium</SelectItem>
-              <SelectItem value="High">High</SelectItem>
-            </Select>
+            <Dropdown value={severity} onValueChange={setSeverity} placeholder="Medium">
+              <DropdownItem value="Low">Low</DropdownItem>
+              <DropdownItem value="Medium">Medium</DropdownItem>
+              <DropdownItem value="High">High</DropdownItem>
+            </Dropdown>
           </div>
         </div>
 
