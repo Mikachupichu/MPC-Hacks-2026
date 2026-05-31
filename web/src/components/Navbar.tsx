@@ -7,10 +7,12 @@ import {
   Shield,
   FileText,
   CreditCard,
+  ScrollText,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: MessageSquare },
+  { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/admin", label: "Admin", icon: Shield },
   { href: "/reports", label: "Reports", icon: FileText },
 ];
@@ -26,7 +28,7 @@ export default function Navbar() {
           className="flex items-center gap-2 font-semibold mr-8"
         >
           <CreditCard className="h-5 w-5 text-blue-600" />
-          <span className="hidden sm:inline">Expense AI</span>
+          <span className="hidden sm:inline">Aero Intel</span>
         </Link>
 
         <nav className="flex items-center gap-1">

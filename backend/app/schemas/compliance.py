@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class ComplianceRule(BaseModel):
     text: str
+    code: int | None = None
     department: str = "all"
     category: str = "all"
     severity: str = "Medium"
@@ -13,9 +14,11 @@ class ComplianceRule(BaseModel):
 class ComplianceRuleResponse(BaseModel):
     id: str
     text: str
+    code: int | None = None
     department: str
-    category: str
+    category: str | None = "all"
     severity: str
+    source: str = "custom"
 
 
 class ComplianceScanRequest(BaseModel):
@@ -25,8 +28,8 @@ class ComplianceScanRequest(BaseModel):
 
 class ComplianceResult(BaseModel):
     transaction_id: str
-    status: str  # "Compliant" or "Violation"
-    severity: str  # "Low", "Medium", "High"
+    status: str
+    severity: str
     reasoning: str
 
 

@@ -1,272 +1,455 @@
-"""Seed MongoDB from the provided dummy_data.xlsx file.
-
-Usage:
-    cd backend && source venv/bin/activate
-    python -m app.scripts.seed_data
-"""
+"""Seed MongoDB from dummy_data.xlsx with proper code/department/type mappings."""
 
 import asyncio
 import os
+import random
 from datetime import datetime
 from pathlib import Path
-from uuid import uuid4
 
 import pandas as pd
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# Load .env.local for MongoDB URI and other settings
+from app.mappings import (
+    CATEGORY_TO_TYPE,
+    CODE_TO_DEPT,
+    MCC_TO_TYPE,
+    resolve_department,
+    resolve_transaction_type,
+)
+
 env_path = Path(__file__).resolve().parents[2] / ".env.local"
 load_dotenv(env_path)
 
-# Configuration — from .env.local or override via env vars
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("MONGODB_DB_NAME", "mpc_hacks_2026")
 EXCEL_PATH = os.getenv("EXCEL_PATH", "/Users/michaelpouget/MPC Hacks 2026/dummy_data.xlsx")
 
-# Map Transaction Codes to departments
-CODE_TO_DEPT = {
-    3001: "Operations",
-    3006: "Sales",
-    3005: "Engineering",
-    137: "Marketing",
-    404: "Finance",
-    401: "HR",
-    108: "Product",
-    375: "Sales",
-    3035: "Operations",
+
+async def seed_policy(db):
+    """Seed the company_policies collection with structural fields."""
+    collection = db["company_policies"]
+    await collection.delete_many({})
+
+    policies = [
+        {
+            "type": "general_business_expenses",
+            "text": (
+                "All expenses over $50.00 must be pre-authorized by your manager. "
+                "Receipts are required before any expense is reimbursed. "
+                "Expenses must be submitted within the current month. "
+                "Falsifying expense reports is expressly prohibited."
+            ),
+            "code": None,
+            "department": "all",
+            "category": None,
+        },
+        {
+            "type": "business_travel",
+            "text": (
+                "Team members must use the most efficient and cost-effective transportation. "
+                "Tolls will be reimbursed. Personal vehicle usage is reimbursed at CRA rates. "
+                "Traffic or parking tickets are not reimbursed. "
+                "Accidents must be reported promptly to the manager."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Operations Expense",
+        },
+        {
+            "type": "fuel_expense",
+            "text": (
+                "Fuel expenses must be for business purposes only. "
+                "Personal fuel purchases are not reimbursable. "
+                "Receipts are required for all fuel transactions."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Fuel",
+        },
+        {
+            "type": "permits_and_regulatory",
+            "text": (
+                "Permit and regulatory fees are reimbursable when required for business operations. "
+                "All permits must be properly documented with receipt and purpose."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Permit",
+        },
+        {
+            "type": "vehicle_maintenance",
+            "text": (
+                "Vehicle maintenance and repair expenses are reimbursable for fleet vehicles. "
+                "Repairs over $500 require prior authorization from the fleet manager."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Vehicle Maintenance",
+        },
+        {
+            "type": "cash_advances",
+            "text": (
+                "Cash advances for drivers are limited to $500 per trip. "
+                "All advances must be reconciled with receipts within 5 business days. "
+                "Cash advance fees are tracked separately."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Cash Advance",
+        },
+        {
+            "type": "credit_card_fees",
+            "text": (
+                "Annual fees and authorized user fees are standard business expenses. "
+                "Additional authorized user fees will be charged to the requesting department."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Card Fee",
+        },
+        {
+            "type": "bill_payments",
+            "text": (
+                "Monthly bill payments must be processed through authorized EFT transfers. "
+                "All payments require dual authorization. "
+                "Late payment interest charges are to be minimized."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Payment",
+        },
+        {
+            "type": "reward_redemptions",
+            "text": (
+                "Point redemptions are tracked as credits. "
+                "Reward points are corporate assets and must be used for business purposes."
+            ),
+            "code": None,
+            "department": "all",
+            "category": "Rewards",
+        },
+    ]
+
+    await collection.insert_many(policies)
+    print(f"  ✓ Seeded {len(policies)} company policies with code/department/category mappings")
+
+
+async def seed_custom_rules(db):
+    """Seed custom rules with code/department/category references (no vector embeddings)."""
+    collection = db["custom_rules"]
+    await collection.delete_many({})
+
+    rules = [
+        {
+            "text": "Fuel expenses over $500 at a single transaction must be reviewed",
+            "code": None,
+            "department": "all",
+            "category": "Fuel",
+            "severity": "Medium",
+        },
+        {
+            "text": "All departments have a $20,000/month fuel budget cap",
+            "code": None,
+            "department": "all",
+            "category": "Fuel",
+            "severity": "High",
+        },
+        {
+            "text": "Cash advances over $300 require manager pre-approval",
+            "code": None,
+            "department": "all",
+            "category": "Cash Advance",
+            "severity": "High",
+        },
+        {
+            "text": "Permit and regulatory fees under $500 per transaction are auto-approved",
+            "code": None,
+            "department": "all",
+            "category": "Permit",
+            "severity": "Low",
+        },
+        {
+            "text": "Vehicle maintenance over $2000 requires department head approval",
+            "code": None,
+            "department": "all",
+            "category": "Vehicle Maintenance",
+            "severity": "Medium",
+        },
+        {
+            "text": "Cross-border (USD) transactions over $500 require manager review",
+            "code": None,
+            "department": "all",
+            "category": "Operations Expense",
+            "severity": "Medium",
+        },
+        {
+            "text": "Any single transaction over $10,000 requires CFO approval",
+            "code": None,
+            "department": "all",
+            "category": "all",
+            "severity": "High",
+        },
+        {
+            "text": "Card fees (annual, authorized user) are fixed costs and not subject to approval",
+            "code": None,
+            "department": "all",
+            "category": "Card Fee",
+            "severity": "Low",
+        },
+        {
+            "text": "EFT payments over $100,000 require dual authorization",
+            "code": None,
+            "department": "all",
+            "category": "Payment",
+            "severity": "High",
+        },
+        {
+            "text": "Interest charges over $10 in a month should trigger a payment review",
+            "code": None,
+            "department": "all",
+            "category": "Interest Charge",
+            "severity": "Medium",
+        },
+    ]
+
+    for rule in rules:
+        rule["created_at"] = datetime.now()
+
+    await collection.insert_many(rules)
+    print(f"  ✓ Seeded {len(rules)} custom rules with code/department/category references (no embeddings)")
+
+
+# Employee names per department (spread across codes for variety)
+OPERATIONS_EMPLOYEES = [
+    "Marcus Johnson", "Sarah Chen", "David Rodriguez", "Emily Thompson",
+    "James Wilson", "Maria Garcia", "Robert Kim", "Jennifer Lee",
+    "Michael Brown", "Amanda Davis", "Chris Martinez", "Jessica Taylor",
+    "Daniel Anderson", "Lisa Thomas", "Kevin Jackson",
+]
+FINANCE_EMPLOYEES = [
+    "Rachel Green", "Thomas Wright", "Nancy Baker", "Steven Hall",
+    "Patricia Adams",
+]
+
+# Reasonings — every string starts with "Recommendation: Approve" or "Recommendation: Decline"
+APPROVED_REASONINGS = {
+    "Fuel": [
+        "Recommendation: Approve — Routine fleet fueling expense at company-approved station within budget.",
+        "Recommendation: Approve — Fuel cost aligns with standard route distance and vehicle consumption benchmarks.",
+        "Recommendation: Approve — Bulk fuel purchase at negotiated fleet rate, within policy limits.",
+        "Recommendation: Approve — Regular fuel stop on authorized route; amount consistent with prior trips.",
+    ],
+    "Permit": [
+        "Recommendation: Approve — Required regulatory permit for interstate hauling at standard rate.",
+        "Recommendation: Approve — State-required oversize/overweight permit compliant with policy.",
+        "Recommendation: Approve — Annual permit renewal at standard regulatory fee schedule.",
+    ],
+    "Toll": [
+        "Recommendation: Approve — Standard toll charge on authorized freight route.",
+        "Recommendation: Approve — Bridge/corridor toll for contracted delivery route, within expected range.",
+    ],
+    "Vehicle Maintenance": [
+        "Recommendation: Approve — Preventive maintenance per fleet schedule; amount within service range.",
+        "Recommendation: Approve — Repair cost justified by fleet vehicle inspection report and under threshold.",
+    ],
+    "Car Wash": [
+        "Recommendation: Approve — Fleet vehicle wash at approved vendor at standard cost.",
+        "Recommendation: Approve — Routine fleet cleaning per company maintenance policy.",
+    ],
+    "Payment": [
+        "Recommendation: Approve — Scheduled EFT payment fully documented and authorized.",
+        "Recommendation: Approve — Monthly payment batch processed with dual authorization.",
+    ],
+    "Card Fee": [
+        "Recommendation: Approve — Standard annual card fee per corporate card agreement.",
+        "Recommendation: Approve — Authorized user fee for approved team member.",
+    ],
+    "Cash Advance": [
+        "Recommendation: Approve — Driver cash advance for on-road expenses within $500 limit.",
+        "Recommendation: Approve — Trip cash advance reconciled with prior trip receipts.",
+    ],
+    "default": [
+        "Recommendation: Approve — Transaction meets all policy requirements and amount is within limits.",
+        "Recommendation: Approve — Expense category and amount are standard business costs for this department.",
+    ],
+}
+DENIED_REASONINGS = {
+    "Fuel": [
+        "Recommendation: Decline — Fuel amount exceeds single-transaction policy limit without authorization.",
+        "Recommendation: Decline — Duplicate fuel purchase flagged — possible personal use detected.",
+        "Recommendation: Decline — Fuel purchase at unauthorized vendor not on company preferred list.",
+    ],
+    "Permit": [
+        "Recommendation: Decline — Permit fee unusually high for standard route; exceeds typical cost by significant margin.",
+    ],
+    "Cash Advance": [
+        "Recommendation: Decline — Cash advance exceeds $500 per-trip limit without pre-approval.",
+        "Recommendation: Decline — Outstanding cash advances not reconciled; new advance denied pending resolution.",
+    ],
+    "default": [
+        "Recommendation: Decline — Amount exceeds department spending threshold without pre-approval.",
+        "Recommendation: Decline — Transaction flagged for policy violation: exceeds authorization limit.",
+        "Recommendation: Decline — Category not within approved expense guidelines for this department.",
+    ],
+}
+PENDING_REASONINGS = {
+    "Fuel": [
+        "Recommendation: Pending — Large fuel transaction requires review against monthly budget cap.",
+        "Recommendation: Pending — Cross-border fuel purchase flagged for currency conversion review.",
+    ],
+    "Equipment": [
+        "Recommendation: Pending — Equipment purchase over $2,000 requires department head approval.",
+        "Recommendation: Pending — Capital expense threshold triggered; awaiting manager sign-off.",
+    ],
+    "default": [
+        "Recommendation: Pending — High-value transaction flagged for manager approval per policy.",
+        "Recommendation: Pending — Amount exceeds $2,000 automatic approval threshold; awaiting finance team review.",
+        "Recommendation: Pending — Unusual pattern detected; pending finance team review.",
+    ],
 }
 
-# Map numeric Transaction Categories to our expense categories
-CATEGORY_MAP = {
-    1: "Travel",
-    2: "Other",
-    3: "Other",
-    10: "Other",
-    12: "Services",
-    19: "Services",
-}
 
-# Map MCC ranges to categories for more granularity
-MCC_TO_CATEGORY = {
-    742: "Services",     # Veterinary services
-    763: "Services",     # Agricultural cooperative
-    780: "Services",     # Landscaping
-    1520: "Services",    # General contractors
-    1711: "Services",    # HVAC, electrical
-    1799: "Services",    # Specialty trade contractors
-    2842: "Other",       # Specialty cleaning
-    3009: "Travel",      # Airlines
-    3366: "Travel",      # Car rentals
-    3405: "Travel",      # Hotels
-    3501: "Travel",      # Hotels
-    3502: "Travel",      # Hotels
-    3508: "Travel",      # Hotels
-    3510: "Travel",      # Hotels
-    3516: "Travel",      # Hotels
-    3528: "Travel",      # Hotels
-    3613: "Travel",      # Car rentals
-    3615: "Travel",      # Car rentals
-    3631: "Travel",      # Car rentals
-    3637: "Travel",      # Car rentals
-    3665: "Travel",      # Car rentals
-    3700: "Travel",      # Truck/utility rentals
-    3709: "Travel",      # Trucking
-    3722: "Travel",      # RV rentals
-    4121: "Travel",      # Taxis
-    4214: "Travel",      # Motor freight carriers
-    4215: "Travel",      # Courier services
-    4511: "Travel",      # Airlines
-    4722: "Travel",      # Travel agencies
-    4784: "Travel",      # Tolls/bridges
-    4789: "Travel",      # Transportation services
-    4812: "Services",    # Telecom equipment
-    4816: "Services",    # Telecom
-    4899: "Services",    # Cable/utility
-    4900: "Utilities",   # Utilities
-    5013: "Hardware",    # Motor vehicle supplies
-    5039: "Hardware",    # Construction materials
-    5045: "Hardware",    # Computers/peripherals
-    5046: "Hardware",    # Commercial equipment
-    5047: "Hardware",    # Medical/dental supplies
-    5085: "Hardware",    # Industrial supplies
-    5099: "Hardware",    # Durable goods
-    5199: "Hardware",    # Non-durable goods
-    5200: "Hardware",    # Home supply
-    5211: "Hardware",    # Building materials
-    5231: "Hardware",    # Glass/paint
-    5251: "Hardware",    # Hardware store
-    5300: "Office Supplies",  # Wholesale clubs
-    5310: "Office Supplies",  # Discount stores
-    5311: "Office Supplies",  # Department stores
-    5331: "Office Supplies",  # Variety stores
-    5399: "Office Supplies",  # Misc general merchandise
-    5411: "Meals",       # Grocery stores
-    5462: "Meals",       # Bakeries
-    5499: "Meals",       # Food stores
-    5511: "Travel",      # Car rentals
-    5532: "Travel",      # Automotive
-    5533: "Travel",      # Automotive parts
-    5541: "Travel",      # Fuel/gas
-    5542: "Travel",      # Fuel
-    5561: "Travel",      # RV/campers
-    5599: "Travel",      # Automotive miscellaneous
-    5661: "Hardware",    # Shoe stores (general merchandise)
-    5732: "Hardware",    # Electronics
-    5734: "Hardware",    # Computer software stores
-    5812: "Meals",       # Restaurants
-    5814: "Meals",       # Fast food
-    5817: "Meals",       # Digital goods/gaming
-    5818: "Meals",       # Food tech
-    5912: "Other",       # Drug stores
-    5931: "Other",       # Used merchandise
-    5942: "Other",       # Book stores
-    5943: "Other",       # Office supplies/stationery
-    5947: "Other",       # Gift/card shops
-    5968: "Other",       # Direct marketing
-    5992: "Other",       # Florists
-    5999: "Other",       # Misc retail
-    6011: "Other",       # Cash disbursement
-    6300: "Services",    # Insurance
-    7011: "Travel",      # Hotels/lodging
-    7299: "Other",       # Personal services
-    7311: "Services",    # Advertising
-    7342: "Services",    # Exterminating
-    7372: "Software",    # Computer programming
-    7375: "Software",    # Info retrieval services
-    7392: "Services",    # Business services
-    7393: "Services",    # Detective agencies
-    7399: "Services",    # Business services
-    7523: "Travel",      # Parking lots
-    7531: "Travel",      # Auto repair
-    7534: "Travel",      # Tire retreading
-    7538: "Travel",      # Auto service
-    7542: "Travel",      # Car washes
-    7549: "Travel",      # Towing
-    7699: "Services",    # Repair shops
-    8099: "Services",    # Medical services
-    8220: "Training",    # Colleges
-    8299: "Training",    # Educational services
-    8398: "Services",    # Nonprofit
-    8675: "Services",    # Auto associations
-    8699: "Services",    # Membership orgs
-    8999: "Services",    # Professional services
-    9211: "Services",    # Court costs
-    9311: "Services",    # Tax payments
-    9399: "Services",    # Government services
-}
-
-# Employee names per department
-EMPLOYEES = {
-    "Operations": ["Alex Rivera", "Jordan Kim", "Taylor Singh", "Morgan Chen"],
-    "Sales": ["Sam Wilson", "Jamie Fox", "Cameron Diaz"],
-    "Engineering": ["Riley Park", "Drew Johnson", "Casey Brown"],
-    "Marketing": ["Avery Lee", "Quinn Davis", "Blake Miller"],
-    "Finance": ["Dana Garcia", "Skyler White"],
-    "HR": ["Jordan Blake", "Emerson Hart"],
-    "Product": ["Reese Taylor", "Logan Wright"],
-}
+def _assign_employee(code: int, txn_counter: int) -> str:
+    """Assign a plausible employee name based on transaction code."""
+    if code in (108, 137, 375, 401, 404):
+        return FINANCE_EMPLOYEES[txn_counter % len(FINANCE_EMPLOYEES)]
+    else:
+        return OPERATIONS_EMPLOYEES[txn_counter % len(OPERATIONS_EMPLOYEES)]
 
 
-def _resolve_category(row: dict) -> str:
-    """Resolve a transaction category from raw MCC and numeric category."""
-    mcc = row.get("Merchant Category Code")
-    if mcc and mcc in MCC_TO_CATEGORY:
-        return MCC_TO_CATEGORY[mcc]
+def _generate_reasoning(
+    transaction_type: str,
+    amount: float,
+    merchant: str,
+    country: str,
+    status: str,
+) -> str:
+    """Generate a plausible AI reasoning text with clear recommendation."""
+    if status == "approved":
+        choices = APPROVED_REASONINGS.get(transaction_type) or APPROVED_REASONINGS["default"]
+    elif status == "denied":
+        choices = DENIED_REASONINGS.get(transaction_type) or DENIED_REASONINGS["default"]
+    else:
+        choices = PENDING_REASONINGS.get(transaction_type) or PENDING_REASONINGS["default"]
 
-    numeric_cat = row.get("Transaction Category", 1)
-    return CATEGORY_MAP.get(numeric_cat, "Other")
+    base = random.choice(choices)
 
+    # Add contextual detail for high-value pending
+    if status == "pending" and amount > 10000:
+        return f"Recommendation: Pending — CFO approval required. ${amount:,.2f} transaction exceeds $10,000 threshold. Additional context: high-value transaction flagged for executive review."
+    # Add USD context for approved
+    if status == "approved" and country == "USA":
+        usd_choices = [
+            " USD transaction reviewed — conversion rate applied correctly at {:.4f}.".format(random.uniform(1.35, 1.39)),
+            " Cross-border expense reviewed; exchange rate verified.",
+        ]
+        return base + random.choice(usd_choices)
+    # Strengthen declined reasoning for high-value
+    if status == "denied" and amount > 3000:
+        return base + f" This ${amount:,.2f} transaction far exceeds typical spend for this category."
 
-def _resolve_department(code: int) -> str:
-    return CODE_TO_DEPT.get(code, "Operations")
+    return base.strip()
 
 
 def _read_and_convert_excel() -> list[dict]:
-    """Read the Excel file and convert to our transactions schema."""
+    """Read Excel and convert to transactions with code/department/type fields."""
     df = pd.read_excel(EXCEL_PATH)
 
-    # Filter: only include Debit transactions (credits = refunds/transfers)
-    df = df[df["Debit or Credit"] == "Debit"]
-
     transactions = []
-    txn_counter = 8000  # Start from a high range to avoid collisions
+    txn_counter = 8000
 
     for _, row in df.iterrows():
         txn_counter += 1
         code = int(row["Transaction Code"])
-        dept = _resolve_department(code)
-
-        # Pick a consistent employee for each transaction code
-        dept_employees = EMPLOYEES.get(dept, ["Staff Member"])
-        employee = dept_employees[hash(str(code)) % len(dept_employees)]
-
-        merchant = str(row.get("Merchant Info DBA Name", "Unknown")).strip()
-        description = str(row.get("Transaction Description", merchant)).strip()
+        debit_or_credit = str(row.get("Debit or Credit", "Debit")).strip()
         amount = float(row["Transaction Amount"])
-        date = row["Transaction Date"]
-        if hasattr(date, "strftime"):
-            date_str = date.strftime("%Y-%m-%d")
-        else:
-            date_str = str(date)[:10]
+        numeric_category = int(row["Transaction Category"])
 
-        category = _resolve_category({
-            "Merchant Category Code": row.get("Merchant Category Code"),
-            "Transaction Category": int(row["Transaction Category"]),
-        })
-        country = str(row.get("Merchant Country", "")).strip()
-        city = str(row.get("Merchant City", "")).strip() or "Unknown"
-        state = str(row.get("Merchant State/Province", "")).strip()
-        # Resolve MCC, handling NaN
+        # Resolve MCC
         mcc_raw = row.get("Merchant Category Code")
         mcc = None
         if mcc_raw is not None:
             try:
                 val = float(mcc_raw)
-                if not (val != val):  # NaN check: NaN != NaN is True
+                if not (val != val):
                     mcc = int(val)
             except (ValueError, TypeError):
                 pass
+
+        # Resolve department and type using canonical mappings
+        department = resolve_department(code)
+        transaction_type = resolve_transaction_type(numeric_category, mcc)
+
+        # Build other fields
+        merchant = str(row.get("Merchant Info DBA Name", "Unknown")).strip()
+        description = str(row.get("Transaction Description", merchant)).strip()
+        date = row["Transaction Date"]
+        date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)[:10]
+
+        country = str(row.get("Merchant Country", "")).strip()
+        city = str(row.get("Merchant City", "")).strip() or "Unknown"
+        state = str(row.get("Merchant State/Province", "")).strip()
         conversion_rate = float(row.get("Conversion Rate", 0) or 0)
 
-        # Determine if it's reimbursable (personal card) or not
-        is_reimbursable = country == "CAN" and amount > 100
-
-        # Tags derived from data
+        # Tags based on transaction type
         tags = []
+        if transaction_type == "Fuel":
+            tags.append("fuel")
         if amount > 1000:
             tags.append("high-value")
         if country == "USA":
             tags.append("usd")
-        if category == "Travel":
-            tags.append("transportation")
-        if mcc and mcc in [5541, 5542]:
-            tags.append("fuel")
+        if transaction_type == "Cash Advance":
+            tags.append("cash-advance")
+        if numeric_category == 19:
+            tags.append("payment")
+        if numeric_category in (2, 10, 12):
+            tags.append("fee")
+
+        # Assign employee
+        employee = _assign_employee(code, txn_counter)
+
+        # Determine approval status and generate reasoning
+        if amount < 50:
+            approval_status = "not_required"
+            reasoning = None
+        elif amount > 2000:
+            approval_status = "pending"
+            reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "pending")
+        elif random.random() < 0.03:
+            approval_status = "denied"
+            reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "denied")
+        else:
+            approval_status = "approved"
+            reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "approved")
 
         transaction = {
             "transaction_id": f"TXN-{txn_counter}",
+            "transaction_code": code,
             "date": date_str,
             "merchant": merchant,
             "amount": amount,
             "currency": "CAD" if country == "CAN" else "USD",
             "conversion_rate": conversion_rate if conversion_rate else 1.0,
-            "department": dept,
+            "department": department,
             "employee": employee,
-            "employee_id": f"EMP-{dept[:3].upper()}-{hash(str(code)) % 900 + 100}",
-            "category": category,
+            "transaction_category": numeric_category,
+            "transaction_type": transaction_type,
             "description": description[:200],
             "items": [],
             "notes": [],
             "tags": tags,
             "compliance_history": [],
-            "approval_status": "approved" if amount < 2000 else "pending",
-            "payment_method": "personal" if is_reimbursable else "corporate_card",
-            "is_reimbursable": is_reimbursable,
+            "approval_status": approval_status,
+            "reasoning": reasoning,
+            "payment_method": "corporate_card",
+            "is_reimbursable": False,
             "merchant_city": city,
             "merchant_state": state,
             "merchant_country": country,
             "merchant_category_code": mcc,
-            "original_transaction_code": code,
+            "debit_or_credit": debit_or_credit,
         }
 
         transactions.append(transaction)
@@ -274,168 +457,8 @@ def _read_and_convert_excel() -> list[dict]:
     return transactions
 
 
-async def seed_policy(db):
-    """Seed the company_policies collection."""
-    collection = db["company_policies"]
-    await collection.delete_many({})
-
-    doc = {
-        "general_business_expenses": (
-            "All expenses over $50.00 must be pre-authorized by your manager. "
-            "Receipts are required before any expense is reimbursed. "
-            "Expenses must be submitted within the current month. "
-            "Falsifying expense reports is expressly prohibited."
-        ),
-        "business_travel": (
-            "Team members must use the most efficient and cost-effective transportation. "
-            "Tolls will be reimbursed. Personal vehicle usage is reimbursed at CRA rates. "
-            "Traffic or parking tickets are not reimbursed. "
-            "Accidents must be reported promptly to the manager."
-        ),
-        "corporate_credit_cards": (
-            "Car rental costs reimbursed when deemed necessary. "
-            "Multiple team members at same location may be required to share a car. "
-            "Company or personal credit card required for car rental. "
-            "Receipts for car rental, parking, and gasoline required."
-        ),
-        "entertainment_and_meals": (
-            "Reasonable entertainment of customers is acceptable. "
-            "Names of guests and purpose must be listed with receipts. "
-            "Unless dining with a customer, expensing alcoholic beverages is not permitted. "
-            "Tips up to 15% for services, meal tips not above 20%."
-        ),
-        "reimbursement_policy": (
-            "Actual costs of expenses directly related to business objectives will be reimbursed. "
-            "Receipts must be submitted within the current month. "
-            "All expenses over $50 require pre-authorization and receipts."
-        ),
-        "full_policy_text": (
-            "It is the policy of Brim to pay for all reasonable expenses incurred by team members "
-            "while doing business for Brim. You are expected to exercise good judgment with respect "
-            "to any expenses you incur and check the accuracy of bills before paying or accepting them.\n\n"
-            "All expenses over $50.00 must be pre-authorized by your manager and receipts are required "
-            "before any expense is reimbursed.\n\n"
-            "Once approved, the actual costs of expenses directly related to accomplishing business "
-            "travel objectives will be reimbursed. You should use best efforts to submit receipts "
-            "within the current month.\n\n"
-            "Abuse of this business expense policy, including falsifying expense reports to reflect "
-            "costs not incurred by the team member is expressly prohibited.\n\n"
-            "## Supplier Entertainment\n"
-            "Reasonable entertainment of customers is acceptable. Names of guests and purpose must "
-            "be listed with the receipts. Unless dining with a customer, expensing alcoholic "
-            "beverages is not permitted.\n\n"
-            "## Tips & Gratuities\n"
-            "Tips may be expensed, up to fifteen percent (15%) for services and porterage. "
-            "Meal tips are to be included with meal claims and will not be reimbursed above "
-            "twenty percent (20%).\n\n"
-            "## Parking\n"
-            "Reasonable parking expenses may be reimbursed.\n\n"
-            "## Transportation Expenses\n"
-            "You are required to use the most efficient and cost-effective form of transportation "
-            "given the total facts and circumstances of your travel. Tolls will be reimbursed. "
-            "Business travel using team member-owned vehicles is permitted. Kilometres driven for "
-            "work will be reimbursed at Canada Revenue Agency rates, which are subject to change annually.\n\n"
-            "If you are involved in an accident while traveling on business, promptly report the "
-            "incident to your Manager. Brim does not pay for traffic or parking tickets, or for "
-            "cars rented for personal use.\n\n"
-            "## Car Rental\n"
-            "The Company will reimburse car rental costs when a rental car is deemed necessary. "
-            "If there are multiple Company team members at the same location, you may be required "
-            "to share a car. If business reasons dictate the use of a non-standard vehicle (i.e., "
-            "four (4) or more Company travelers), you will be reimbursed accordingly. You will be "
-            "required to use your Company or personal credit card to rent a car. Car rental, parking "
-            "and gasoline receipts are required for reimbursement.\n\n"
-            "## Car Insurance\n"
-            "You should inform your automobile insurer if you use your vehicle for work purposes; "
-            "this may increase your insurance premium. Brim will not assume any liability for any "
-            "loss or accident relating to the operation of your personal vehicle since it is your "
-            "responsibility to ensure that you carry adequate insurance to cover such losses. If you "
-            "rent or lease a vehicle, it becomes your personal vehicle for the purposes of this policy."
-        ),
-    }
-
-    await collection.insert_one(doc)
-    print(f"  ✓ Seeded company_policies collection")
-
-
-async def seed_custom_rules(db):
-    """Seed the custom_rules collection."""
-    collection = db["custom_rules"]
-    await collection.delete_many({})
-
-    rules = [
-        {
-            "text": "Fuel expenses over $500 at a single transaction must be reviewed",
-            "department": "all",
-            "category": "Travel",
-            "severity": "Medium",
-        },
-        {
-            "text": "Transportation expenses over $2000 require VP-level pre-approval",
-            "department": "all",
-            "category": "Travel",
-            "severity": "High",
-        },
-        {
-            "text": "US Dollar transactions over $1000 must have conversion rate documented",
-            "department": "all",
-            "category": "all",
-            "severity": "Medium",
-        },
-        {
-            "text": "Operations department has a $20,000/month fuel budget cap",
-            "department": "Operations",
-            "category": "Travel",
-            "severity": "High",
-        },
-        {
-            "text": "Personal vehicle mileage reimbursement requires trip log submission",
-            "department": "all",
-            "category": "Travel",
-            "severity": "Medium",
-        },
-        {
-            "text": "Cross-border transactions (USD) over $500 require manager approval",
-            "department": "all",
-            "category": "Travel",
-            "severity": "Medium",
-        },
-        {
-            "text": "Permit and regulatory fees under $500 per transaction are auto-approved",
-            "department": "all",
-            "category": "Services",
-            "severity": "Low",
-        },
-        {
-            "text": "Equipment purchases over $2000 require department head approval",
-            "department": "all",
-            "category": "Hardware",
-            "severity": "Medium",
-        },
-        {
-            "text": "Sales team travel budget is capped at $15,000/month",
-            "department": "Sales",
-            "category": "Travel",
-            "severity": "High",
-        },
-        {
-            "text": "Any single transaction over $10,000 requires CFO approval",
-            "department": "all",
-            "category": "all",
-            "severity": "High",
-        },
-    ]
-
-    for rule in rules:
-        rule["created_at"] = datetime.now()
-        rule["rule_embedding"] = []
-
-    await collection.insert_many(rules)
-    print(f"  ✓ Seeded {len(rules)} custom rules")
-
-
 async def seed_transactions(db):
-    """Seed the transactions collection from the Excel dummy data."""
+    """Seed transactions from Excel with full code/department/type metadata."""
     collection = db["transactions"]
     await collection.delete_many({})
 
@@ -444,48 +467,65 @@ async def seed_transactions(db):
 
     # Create indexes
     await collection.create_index("transaction_id", unique=True)
+    await collection.create_index("transaction_code")
     await collection.create_index("date")
     await collection.create_index("department")
-    await collection.create_index("category")
+    await collection.create_index("transaction_category")
+    await collection.create_index("transaction_type")
     await collection.create_index("approval_status")
-    await collection.create_index("employee")
     await collection.create_index("merchant")
-    await collection.create_index("original_transaction_code")
 
-    # Print summary stats
+    # Summary
     depts = set(t["department"] for t in transactions)
-    cats = set(t["category"] for t in transactions)
+    types = set(t["transaction_type"] for t in transactions)
     amount_total = sum(t["amount"] for t in transactions)
     amount_min = min(t["amount"] for t in transactions)
     amount_max = max(t["amount"] for t in transactions)
 
-    print(f"  ✓ Seeded {len(transactions)} transactions from Excel")
+    print(f"  ✓ Seeded {len(transactions)} transactions")
     print(f"  ✓ Range: ${amount_min:.2f} - ${amount_max:,.2f}, Total: ${amount_total:,.2f}")
     print(f"  ✓ Departments: {', '.join(sorted(depts))}")
-    print(f"  ✓ Categories: {', '.join(sorted(cats))}")
-    print(f"  ✓ Created indexes on transaction_id, date, department, category, etc.")
+    print(f"  ✓ Transaction types: {', '.join(sorted(types))}")
+    print(f"  ✓ Indexes on transaction_code, department, transaction_type, etc.")
+
+
+async def seed_department_budgets(db):
+    """Seed department budget data."""
+    collection = db["department_budgets"]
+    await collection.delete_many({})
+
+    # Realistic annual budgets based on spend patterns
+    budgets = [
+        {"department": "Operations", "annual_budget": 3_000_000, "monthly_budget": 250_000},
+        {"department": "Finance", "annual_budget": 50_000, "monthly_budget": 5_000},
+        {"department": "Engineering", "annual_budget": 500_000, "monthly_budget": 42_000},
+        {"department": "Marketing", "annual_budget": 300_000, "monthly_budget": 25_000},
+        {"department": "Sales", "annual_budget": 400_000, "monthly_budget": 33_000},
+        {"department": "HR", "annual_budget": 100_000, "monthly_budget": 8_500},
+        {"department": "Product", "annual_budget": 350_000, "monthly_budget": 29_000},
+    ]
+    await collection.insert_many(budgets)
+    print(f"  ✓ Seeded {len(budgets)} department budgets")
 
 
 async def main():
-    print("Connecting to MongoDB...")
-
-    # Python 3.14 on macOS has cert store issues — use tlsInsecure for Atlas
     kwargs = {"serverSelectionTimeoutMS": 30000}
     if "mongodb+srv" in MONGODB_URI:
         kwargs["tlsInsecure"] = True
 
+    print("Connecting to MongoDB...")
     client = AsyncIOMotorClient(MONGODB_URI, **kwargs)
     db = client[DB_NAME]
 
-    print("\n🌱 Seeding database from Excel data...\n")
+    print("\n🌱 Seeding database from Excel data with canonical mappings...\n")
 
     await seed_policy(db)
     await seed_custom_rules(db)
+    await seed_department_budgets(db)
     await seed_transactions(db)
 
     print("\n✅ Database seeding complete!")
-    print(f"  Collections: company_policies, custom_rules, transactions")
-    for coll_name in ["company_policies", "custom_rules", "transactions"]:
+    for coll_name in ["company_policies", "custom_rules", "department_budgets", "transactions"]:
         count = await db[coll_name].count_documents({})
         print(f"  {coll_name}: {count} documents")
 

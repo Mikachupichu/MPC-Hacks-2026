@@ -12,4 +12,5 @@ class GraphState(TypedDict):
     report_payload: dict[str, Any]
     pending_approval: dict[str, Any] | None
     user_query: str | None
+    conversation_id: str | None
     error: str | None

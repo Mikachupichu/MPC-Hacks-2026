@@ -6,14 +6,31 @@ import {
   Title,
   Text,
   Button,
-  TextInput,
   Select,
   SelectItem,
   Textarea,
 } from "@tremor/react";
 import { toast } from "sonner";
-import { createRule, listRules } from "@/lib/api";
+import { createRule } from "@/lib/api";
 import type { ComplianceRule } from "@/lib/types";
+
+const DEPARTMENTS = [
+  { value: "all", label: "All Departments" },
+  { value: "Operations", label: "Operations" },
+  { value: "Finance", label: "Finance" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Marketing", label: "Marketing" },
+  { value: "Sales", label: "Sales" },
+  { value: "HR", label: "HR" },
+  { value: "Product", label: "Product" },
+];
+
+const TYPE_OPTIONS = [
+  "all", "Fuel", "Permit", "Toll", "Vehicle Maintenance", "Car Wash", "Shipping",
+  "Equipment", "Telecom", "Lodging", "Meals", "Transportation", "Office Supplies",
+  "Software", "Services", "Cash Advance", "Operations Expense",
+  "Interest Charge", "Cash Advance Fee", "Card Fee", "Payment", "Other",
+];
 
 interface RulesFormProps {
   onRuleCreated?: (rule: ComplianceRule) => void;
@@ -41,10 +58,6 @@ export default function RulesForm({ onRuleCreated }: RulesFormProps) {
       toast.success("Rule created successfully");
       setText("");
       onRuleCreated?.(rule);
-      // Refresh rules list via parent
-      listRules()
-        .then(() => {})
-        .catch(() => {});
     } catch (err) {
       toast.error("Failed to create rule");
     } finally {
@@ -56,50 +69,45 @@ export default function RulesForm({ onRuleCreated }: RulesFormProps) {
     <Card>
       <Title>Create Custom Spending Rule</Title>
       <Text className="mt-1">
-        Define a new policy rule that will be used for compliance scanning.
+        Rules target specific departments and transaction types. The transaction code is auto-assigned from the department.
       </Text>
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">Rule Text</label>
           <Textarea
-            placeholder="e.g., Software subscriptions over $500/month must be approved by department head"
+            placeholder="e.g., Fuel expenses over $500 must be reviewed"
             value={text}
             onChange={(e) => setText(e.target.value)}
             required
           />
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Department</label>
             <Select value={department} onValueChange={setDepartment}>
-              <SelectItem value="all">All Departments</SelectItem>
-              <SelectItem value="Engineering">Engineering</SelectItem>
-              <SelectItem value="Marketing">Marketing</SelectItem>
-              <SelectItem value="Sales">Sales</SelectItem>
-              <SelectItem value="Operations">Operations</SelectItem>
-              <SelectItem value="HR">HR</SelectItem>
-              <SelectItem value="Finance">Finance</SelectItem>
-              <SelectItem value="Product">Product</SelectItem>
+              {DEPARTMENTS.map((d) => (
+                <SelectItem key={d.value} value={d.value}>
+                  {d.label}
+                </SelectItem>
+              ))}
             </Select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Category</label>
+            <label className="block text-sm font-medium mb-1">Transaction Type / Category</label>
             <Select value={category} onValueChange={setCategory}>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="Software">Software</SelectItem>
-              <SelectItem value="Travel">Travel</SelectItem>
-              <SelectItem value="Meals">Meals</SelectItem>
-              <SelectItem value="Entertainment">Entertainment</SelectItem>
-              <SelectItem value="Hardware">Hardware</SelectItem>
-              <SelectItem value="Office Supplies">Office Supplies</SelectItem>
-              <SelectItem value="Services">Services</SelectItem>
-              <SelectItem value="Training">Training</SelectItem>
+              {TYPE_OPTIONS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t === "all" ? "All Types" : t}
+                </SelectItem>
+              ))}
             </Select>
           </div>
+        </div>
 
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Severity</label>
             <Select value={severity} onValueChange={setSeverity}>

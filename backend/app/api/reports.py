@@ -29,8 +29,8 @@ async def compile_report(request: ReportRequest):
             if date_query:
                 query["date"] = date_query
 
-        cursor = collection.find(query).sort("date", -1).limit(500)
-        transactions = await cursor.to_list(length=500)
+        cursor = collection.find(query).sort("date", -1).limit(10000)
+        transactions = await cursor.to_list(length=10000)
 
         if not transactions:
             return ReportResponse(report_payload={}, error="No transactions found matching criteria")

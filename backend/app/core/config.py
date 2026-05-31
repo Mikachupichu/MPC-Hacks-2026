@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = True
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash-lite"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     model_config = {"env_file": ".env.local", "env_file_encoding": "utf-8"}
 

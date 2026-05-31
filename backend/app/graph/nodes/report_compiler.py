@@ -1,9 +1,10 @@
 import json
 import re
+from collections import Counter
+from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
-from app.graph.nodes.compliance_scanner import evaluate_transactions
 from app.graph.state import GraphState
 
 try:
@@ -12,145 +13,132 @@ except ImportError:
     genai = None
 
 
-REPORT_SYSTEM_PROMPT = """You are an AI expense report compiler. Your job is to take a batch of transactions with compliance assessments and produce a comprehensive, beautifully structured JSON dashboard document.
-
-The report must include:
-1. An executive summary text block describing the overall expense health
-2. Overall compliance health status (percentage compliant, total spent, etc.)
-3. Nested sub-sections with structured chart data ready for Tremor visualization
-
-Respond ONLY with valid JSON in this exact structure:
-{{
-  "report_title": "Executive Expense Summary",
-  "generated_at": "ISO date string",
-  "executive_summary": {{
-    "text": "Multi-sentence summary of findings...",
-    "total_transactions": 0,
-    "total_spent": 0.0,
-    "compliant_count": 0,
-    "violation_count": 0,
-    "compliance_rate": 0.0,
-    "total_pending": 0
-  }},
-  "compliance_health": {{
-    "status": "Good" | "Needs Attention" | "Critical",
-    "by_department": [
-      {{"department": "Engineering", "compliant": 10, "violations": 2, "total": 12000.0}}
-    ],
-    "by_category": [
-      {{"category": "Software", "compliant": 5, "violations": 1, "total": 8000.0}}
-    ]
-  }},
-  "sections": [
-    {{
-      "title": "Spending by Department",
-      "visualization_type": "bar_chart",
-      "config": {{"x_key": "department", "y_keys": ["total"], "colors": ["#3b82f6"]}},
-      "data": [{{"department": "Engineering", "total": 45000.0}}]
-    }},
-    {{
-      "title": "Monthly Spend Trend",
-      "visualization_type": "line_chart",
-      "config": {{"x_key": "month", "y_keys": ["spend"], "colors": ["#10b981"]}},
-      "data": [{{"month": "2026-01", "spend": 32000.0}}]
-    }},
-    {{
-      "title": "Top Expenses",
-      "visualization_type": "table",
-      "config": {{"x_key": "merchant", "y_keys": ["amount", "department"]}},
-      "data": [{{"merchant": "AWS", "amount": 5200.0, "department": "Engineering"}}]
-    }},
-    {{
-      "title": "Compliance Overview",
-      "visualization_type": "text",
-      "config": {{}},
-      "data": []
-    }}
-  ]
-}}
-
-Be thorough. Generate at least 4-5 sections covering: department breakdown, category breakdown, monthly trend, top expenses, and compliance breakdown.
-Ensure all numbers are reasonable and add up correctly.
-"""
-
-
 async def report_compiler_node(state: GraphState) -> dict[str, Any]:
     """Compiles multi-transaction expense logs into a single summary report.
 
-    Receives a batch of transactions, pipes them through compliance scanning,
-    then compiles a comprehensive dashboard JSON document.
+    Uses existing approval_status from the database instead of re-scanning
+    every transaction. Skips the LLM for large batches to avoid timeouts.
     """
     transactions = state.get("current_transactions", [])
     if not transactions:
-        return {
-            "report_payload": {},
-            "error": "No transactions provided for report compilation.",
-        }
+        return {"report_payload": {}, "error": "No transactions provided."}
 
     try:
-        # Run compliance scan on the entire batch
-        compliance_results = await evaluate_transactions(transactions)
-
-        # Build compliance-augmented transaction list
-        augmented_txns = []
+        # Build compliance results from existing DB fields
+        compliance_results: dict[str, dict[str, Any]] = {}
         for txn in transactions:
             txn_id = txn.get("transaction_id", str(txn.get("_id", "")))
-            compliance = compliance_results.get(txn_id, {})
-            augmented_txns.append({**txn, "_compliance": compliance})
+            status = txn.get("approval_status", "approved")
+            reasoning = txn.get("reasoning")
+            is_violation = status == "denied"
+            compliance_results[txn_id] = {
+                "transaction_id": txn_id,
+                "status": "Violation" if is_violation else "Compliant",
+                "severity": "High" if is_violation else "Low",
+                "reasoning": reasoning or "",
+            }
 
-        # Generate report via Gemini
-        report_payload = await _generate_report(augmented_txns, compliance_results)
+        # Double-check a sample of approved and denied transactions against policy
+        approved_sample = [t for t in transactions if t.get("approval_status") == "approved"][:10]
+        denied_sample = [t for t in transactions if t.get("approval_status") == "denied"][:10]
+        audit_sample = (approved_sample + denied_sample)[:10]
+        if audit_sample:
+            from app.core.database import get_collection
+            audit_results = await _audit_transactions(audit_sample)
+            for txn_id, result in audit_results.items():
+                if txn_id in compliance_results:
+                    compliance_results[txn_id] = result
+                    # If AI changed its mind, update in DB too
+                    for txn in audit_sample:
+                        if txn.get("transaction_id") == txn_id:
+                            old_status = txn.get("approval_status", "")
+                            new_rec = result.get("reasoning", "")
+                            # Check if the new recommendation contradicts the old status
+                            if old_status == "approved" and "Recommendation: Pending" in new_rec:
+                                collection = await get_collection("transactions")
+                                await collection.update_one(
+                                    {"transaction_id": txn_id},
+                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
+                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "Medium", "reasoning": f"Audit: previously approved but new recommendation flags for review."}}}
+                                )
+                            elif old_status == "approved" and "Recommendation: Decline" in new_rec:
+                                collection = await get_collection("transactions")
+                                await collection.update_one(
+                                    {"transaction_id": txn_id},
+                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
+                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously approved but now recommended to decline."}}}
+                                )
+                            elif old_status == "denied" and "Recommendation: Pending" in new_rec:
+                                collection = await get_collection("transactions")
+                                await collection.update_one(
+                                    {"transaction_id": txn_id},
+                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
+                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "Medium", "reasoning": f"Audit: previously denied but new recommendation flags for re-review."}}}
+                                )
+                            elif old_status == "denied" and "Recommendation: Approve" in new_rec:
+                                collection = await get_collection("transactions")
+                                await collection.update_one(
+                                    {"transaction_id": txn_id},
+                                    {"$set": {"approval_status": "pending", "reasoning": new_rec},
+                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "Low", "reasoning": f"Audit: previously denied but now recommended for approval."}}}
+                                )
+                            break
+
+        # Build report from data (fast aggregation path for any batch size)
+        report_payload = _build_aggregated_report(transactions, compliance_results)
+
+        # Extract pending approvals
+        pending_approvals = [
+            {
+                "transaction_id": t.get("transaction_id", ""),
+                "merchant": t.get("merchant", ""),
+                "amount": t.get("amount", 0),
+                "department": t.get("department", ""),
+                "transaction_type": t.get("transaction_type", ""),
+                "date": str(t.get("date", "")),
+                "reasoning": t.get("reasoning", ""),
+            }
+            for t in transactions
+            if t.get("approval_status") == "pending"
+        ]
+        report_payload["pending_approvals"] = pending_approvals
 
         return {
             "report_payload": report_payload,
             "compliance_results": compliance_results,
-            "messages": state.get("messages", [])
-            + [
-                {
-                    "role": "assistant",
-                    "content": "Report compiled successfully.",
-                }
-            ],
         }
 
     except Exception as e:
-        return {
-            "report_payload": {},
-            "error": f"Report compilation failed: {str(e)}",
-        }
+        return {"report_payload": {}, "error": f"Report compilation failed: {str(e)}"}
 
 
 async def _generate_report(
     transactions: list[dict[str, Any]],
     compliance_results: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Generate the comprehensive report JSON via Gemini."""
+    """Try LLM report generation for small batches, fall back to aggregation."""
     try:
         if genai is None:
-            return _build_fallback_report(transactions, compliance_results)
+            return _build_aggregated_report(transactions, compliance_results)
 
         client = genai.Client(api_key=settings.gemini_api_key)
 
-        txn_summary = []
-        for txn in transactions[:100]:  # Limit to 100 for token budget
-            txn_id = txn.get("transaction_id", "")
-            compliance = compliance_results.get(txn_id, {})
-            txn_summary.append({
-                "transaction_id": txn_id,
-                "merchant": txn.get("merchant", ""),
-                "amount": txn.get("amount", 0),
-                "department": txn.get("department", ""),
-                "category": txn.get("category", ""),
-                "date": str(txn.get("date", "")),
-                "compliance_status": compliance.get("status", "Unknown"),
-                "severity": compliance.get("severity", "None"),
-            })
+        txn_summary = [
+            {
+                "merchant": t.get("merchant", ""),
+                "amount": t.get("amount", 0),
+                "department": t.get("department", ""),
+                "transaction_type": t.get("transaction_type", ""),
+                "date": str(t.get("date", "")),
+                "status": compliance_results.get(t.get("transaction_id", ""), {}).get("status", "Unknown"),
+            }
+            for t in transactions[:30]  # Limit to 30 for Gemini
+        ]
 
         prompt = (
-            f"{REPORT_SYSTEM_PROMPT}\n\n"
-            f"Generate a comprehensive expense report from these {len(transactions)} transactions:\n"
+            f"Generate a brief executive expense report JSON for {len(transactions)} transactions:\n"
             f"{json.dumps(txn_summary, default=str)}\n\n"
-            f"Respond with the complete JSON report only."
+            "Respond ONLY with JSON: {{\"report_title\":\"...\",\"executive_summary\":{{\"text\":\"...\",\"total_transactions\":N,\"total_spent\":N,\"compliant_count\":N,\"violation_count\":N,\"compliance_rate\":N}},\"compliance_health\":{{\"status\":\"Good\"|\"Needs Attention\",\"by_department\":[{{\"department\":\"...\",\"total\":N}}],\"by_category\":[{{\"category\":\"...\",\"total\":N}}]}},\"sections\":[{{\"title\":\"...\",\"visualization_type\":\"bar_chart\"|\"table\",\"config\":{{\"x_key\":\"...\",\"y_keys\":[\"...\"],\"colors\":[\"blue\"]}},\"data\":[...]}}]}}"
         )
 
         response = client.models.generate_content(
@@ -160,100 +148,191 @@ async def _generate_report(
         parsed = _parse_report_json(response.text)
         if parsed:
             return parsed
-
     except Exception:
         pass
 
-    return _build_fallback_report(transactions, compliance_results)
+    return _build_aggregated_report(transactions, compliance_results)
 
 
 def _parse_report_json(text: str) -> dict | None:
-    """Robust JSON parser for report output."""
     json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if json_match:
         try:
             return json.loads(json_match.group(1))
         except json.JSONDecodeError:
             pass
-
     brace_match = re.search(r"\{.*\}", text, re.DOTALL)
     if brace_match:
         try:
             return json.loads(brace_match.group(0))
         except json.JSONDecodeError:
             pass
-
     return None
 
 
-def _build_fallback_report(
+async def _audit_transactions(transactions: list[dict]) -> dict[str, dict[str, Any]]:
+    """Re-evaluate a sample of transactions against company policy via Gemini."""
+    try:
+        from google import genai
+        if genai is None:
+            return {}
+
+        client = genai.Client(api_key=settings.gemini_api_key)
+        results: dict[str, dict[str, Any]] = {}
+
+        batch_json = [
+            {
+                "transaction_id": t.get("transaction_id", ""),
+                "merchant": t.get("merchant", ""),
+                "amount": t.get("amount", 0),
+                "department": t.get("department", ""),
+                "transaction_type": t.get("transaction_type", ""),
+                "current_status": t.get("approval_status", ""),
+                "current_reasoning": t.get("reasoning", ""),
+            }
+            for t in transactions
+        ]
+
+        prompt = (
+            "You are a policy auditor double-checking expense transactions. "
+            "Review each transaction against standard expense policy (all expenses over $50 need receipts, "
+            "transactions over $2000 need approval, any transaction over $10000 needs CFO approval).\n\n"
+            "For each transaction, decide if the current status and reasoning are still correct. "
+            "If you disagree with the previous decision, set status to 'Violation' and explain why.\n\n"
+            "Respond with a JSON array. Only include transactions where you disagree with the previous decision:\n"
+            "[{\"transaction_id\":\"...\", \"status\":\"Violation\", \"severity\":\"Low\"|\"Medium\"|\"High\", "
+            "\"reasoning\":\"Recommendation: Pending — <explanation of why the previous decision was wrong>\"}]\n\n"
+            "Return [] if all decisions are correct."
+        )
+
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=f"{prompt}\n\nTransactions to audit:\n{json.dumps(batch_json, default=str)}",
+        )
+
+        array_match = re.search(r"\[.*?\]", response.text, re.DOTALL)
+        if array_match:
+            try:
+                arr = json.loads(array_match.group(0))
+                for item in arr:
+                    if isinstance(item, dict) and item.get("status") == "Violation":
+                        tid = item["transaction_id"]
+                        results[tid] = {
+                            "transaction_id": tid,
+                            "status": "Violation",
+                            "severity": item.get("severity", "Medium"),
+                            "reasoning": item.get("reasoning", "Recommendation: Pending — Re-evaluated and flagged."),
+                        }
+            except json.JSONDecodeError:
+                pass
+
+        return results
+    except Exception:
+        return {}
+
+
+def _build_aggregated_report(
     transactions: list[dict[str, Any]],
     compliance_results: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build a structured report from data without LLM."""
+    """Fast aggregated report from transaction data — no LLM calls."""
     total_spent = sum(t.get("amount", 0) for t in transactions)
     total_txns = len(transactions)
-    violations = sum(
-        1 for c in compliance_results.values() if c.get("status") == "Violation"
-    )
-    compliant = total_txns - violations
+    violations = sum(1 for c in compliance_results.values() if c.get("status") == "Violation")
+    pending_count = sum(1 for t in transactions if t.get("approval_status") == "pending")
+    compliant = total_txns - violations - pending_count
 
+    # Aggregations
     dept_spend: dict[str, float] = {}
-    cat_spend: dict[str, float] = {}
+    type_spend: dict[str, float] = {}
+    monthly_spend: dict[str, float] = {}
+    merchant_spend: dict[str, float] = {}
+
     for t in transactions:
         d = t.get("department", "Unknown")
-        c = t.get("category", "Unknown")
+        c = t.get("transaction_type") or "Other"
         a = t.get("amount", 0)
+        month = str(t.get("date", ""))[:7]
+        m = t.get("merchant", "Unknown")
+
         dept_spend[d] = dept_spend.get(d, 0) + a
-        cat_spend[c] = cat_spend.get(c, 0) + a
+        type_spend[c] = type_spend.get(c, 0) + a
+        monthly_spend[month] = monthly_spend.get(month, 0) + a
+        merchant_spend[m] = merchant_spend.get(m, 0) + a
+
+    compliance_rate = round(compliant / max(total_txns, 1) * 100, 1)
+    status = "Good" if violations == 0 else "Needs Attention" if violations < total_txns * 0.2 else "Critical"
+
+    # Build monthly data
+    all_months = sorted(monthly_spend.keys())
+    if len(all_months) > 1:
+        monthly_vis = "area_chart"
+        monthly_data = [{"month": m, "spend": round(monthly_spend.get(m, 0), 2)} for m in all_months]
+    else:
+        monthly_vis = "bar_chart"
+        monthly_data = [{"month": m, "spend": round(s, 2)} for m, s in sorted(monthly_spend.items())]
+
+    # Build verbal summaries
+    top_month_val = sorted(monthly_spend.items(), key=lambda x: -x[1])[-1] if monthly_spend else ("", 0)
+    avg_monthly = round(total_spent / max(len(all_months), 1), 2)
+    top10_merchants = sorted(merchant_spend.items(), key=lambda x: -x[1])[:10]
+    top10_total = sum(v for _, v in top10_merchants)
+    sorted_txns = sorted(transactions, key=lambda x: -x.get("amount", 0))
+    top_txn = sorted_txns[0] if sorted_txns else {}
 
     return {
         "report_title": "Expense Summary Report",
-        "generated_at": str(__import__("datetime").datetime.now()),
+        "generated_at": datetime.now().isoformat(),
         "executive_summary": {
-            "text": f"Analysis of {total_txns} transactions totaling ${total_spent:,.2f}. "
-            f"Found {violations} policy violations ({violations/max(total_txns,1)*100:.0f}% violation rate).",
+            "text": (
+                f"Analysis of {total_txns} transactions totaling ${total_spent:,.2f}. "
+                f"{compliant} compliant, {violations} violations ({compliance_rate}% compliance rate). "
+                f"{pending_count} transactions pending approval."
+            ),
             "total_transactions": total_txns,
             "total_spent": round(total_spent, 2),
             "compliant_count": compliant,
             "violation_count": violations,
-            "compliance_rate": round(compliant / max(total_txns, 1) * 100, 1),
-            "total_pending": 0,
+            "compliance_rate": compliance_rate,
+            "total_pending": pending_count,
         },
         "compliance_health": {
-            "status": "Good" if violations == 0 else "Needs Attention" if violations < total_txns * 0.2 else "Critical",
+            "status": status,
             "by_department": [
                 {"department": d, "total": round(t, 2)}
                 for d, t in sorted(dept_spend.items(), key=lambda x: -x[1])
             ],
             "by_category": [
                 {"category": c, "total": round(t, 2)}
-                for c, t in sorted(cat_spend.items(), key=lambda x: -x[1])
+                for c, t in sorted(type_spend.items(), key=lambda x: -x[1])
             ],
         },
         "sections": [
             {
-                "title": "Spending by Department",
-                "visualization_type": "bar_chart",
-                "config": {"x_key": "department", "y_keys": ["total"], "colors": ["#3b82f6"]},
-                "data": [{"department": d, "total": round(t, 2)} for d, t in sorted(dept_spend.items(), key=lambda x: -x[1])],
+                "title": "Monthly Spend Trend",
+                "summary": f"Monthly spending peaked in {top_month_val[0]} at ${top_month_val[1]:,.2f}. "
+                           f"Average monthly spend is ${avg_monthly:,.2f} across {len(all_months)} months.",
+                "visualization_type": monthly_vis,
+                "config": {"x_key": "month", "y_keys": ["spend"], "colors": ["blue"]},
+                "data": monthly_data,
             },
             {
-                "title": "Spending by Category",
+                "title": "Top 10 Merchants",
+                "summary": f"The top 10 merchants account for ${top10_total:,.2f} in total spending.",
                 "visualization_type": "bar_chart",
-                "config": {"x_key": "category", "y_keys": ["total"], "colors": ["#10b981"]},
-                "data": [{"category": c, "total": round(t, 2)} for c, t in sorted(cat_spend.items(), key=lambda x: -x[1])],
+                "config": {"x_key": "merchant", "y_keys": ["total"], "colors": ["violet"]},
+                "data": [{"merchant": m, "total": round(s, 2)} for m, s in top10_merchants],
             },
             {
                 "title": "Top Expenses",
+                "summary": f"Highest single expense: ${top_txn.get('amount', 0):,.2f} at {top_txn.get('merchant', 'N/A')}.",
                 "visualization_type": "table",
-                "config": {"x_key": "merchant", "y_keys": ["amount", "department", "category"]},
-                "data": sorted(
-                    [{"merchant": t.get("merchant", ""), "amount": t.get("amount", 0),
-                      "department": t.get("department", ""), "category": t.get("category", "")}
-                     for t in transactions],
-                    key=lambda x: -x["amount"],
-                )[:10],
+                "config": {"x_key": "merchant", "y_keys": ["amount", "department", "transaction_type"]},
+                "data": [
+                    {"merchant": t.get("merchant", ""), "amount": t.get("amount", 0),
+                      "department": t.get("department", ""), "transaction_type": t.get("transaction_type", "")}
+                    for t in sorted_txns[:15]
+                ],
             },
         ],
     }

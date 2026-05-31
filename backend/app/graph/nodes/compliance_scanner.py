@@ -13,7 +13,7 @@ except ImportError:
     genai = None
 
 
-COMPLIANCE_SYSTEM_PROMPT = """You are an AI compliance officer for SMB expense management. Your job is to evaluate transactions against company policy and flag violations with human-like contextual reasoning.
+COMPLIANCE_SYSTEM_PROMPT = """You are an AI compliance officer for SMB expense management. Evaluate transactions against company policy and flag violations with contextual reasoning.
 
 Company Policy Document:
 {policy_text}
@@ -22,56 +22,70 @@ Relevant Custom Rules:
 {custom_rules}
 
 For each transaction, evaluate with contextual reasoning:
-- Consider the merchant type, amount, category, and employee context
-- A $200 team dinner for 5 people is reasonable; a $200 solo dinner at a high-end restaurant may not be
-- Repeat patterns matter - flag habitual overspending
-- Consider department budgets and typical spending patterns
+- Consider the merchant type, amount, department, and transaction type
+- A $200 multi-item fuel stop for a fleet is reasonable; an outsized single fuel transaction may indicate personal use
+- Repeat patterns matter — flag habitual overspending
+- Consider each department's typical spend profile
+- WATCH FOR SPLIT TRANSACTIONS: If multiple transactions from the same merchant or similar amounts appear close together that collectively exceed a threshold, flag them as potential split-purchases designed to dodge approval limits
+- FLAG REPEAT OFFENDERS: If an employee has multiple violations, note the repeat pattern in the reasoning (e.g. "Third policy violation from this employee this period")
 
-Respond with a JSON array of objects, one per transaction:
+Respond with a JSON array:
 [
   {{
     "transaction_id": "str",
     "status": "Compliant" or "Violation",
     "severity": "Low" or "Medium" or "High",
-    "reasoning": "Specific explanation of why this passes or violates policy",
-    "policy_sections_violated": ["section1", "section2"]
+    "reasoning": "Specific explanation"
   }}
 ]
-
-Be thorough but fair. Not every large expense is a violation - consider context.
 """
 
 
 async def compliance_scanner_node(state: GraphState) -> dict[str, Any]:
-    """Centralized evaluation engine that processes transactions in parallel."""
+    """Centralized evaluation engine using code/department-based rule matching."""
     transactions = state.get("current_transactions", [])
     if not transactions:
         return {"compliance_results": {}, "error": "No transactions to evaluate"}
 
     try:
-        # 1. Fetch baseline policy
         policy_doc = await _fetch_policy()
         policy_text = _format_policy_text(policy_doc) if policy_doc else "No policy found."
 
-        # 2. For each transaction, vector search custom rules
+        # Match rules by code and department instead of vector search
         async def _get_rules_for_txn(txn: dict) -> str:
-            return await _semantic_rule_search(txn)
+            return await _match_rules_by_code(txn)
 
         rules_tasks = [_get_rules_for_txn(t) for t in transactions]
         rules_results = await asyncio.gather(*rules_tasks)
 
-        # 3. Evaluate all transactions in parallel through Gemini
         async def _evaluate(txn: dict, rules_str: str) -> dict:
             return await _evaluate_single(txn, policy_text, rules_str)
 
         eval_tasks = [_evaluate(t, r) for t, r in zip(transactions, rules_results)]
         eval_results = await asyncio.gather(*eval_tasks)
 
-        # Build results dict
         compliance_results: dict[str, dict[str, Any]] = {}
         for txn, result in zip(transactions, eval_results):
             txn_id = txn.get("transaction_id", txn.get("_id", str(txn)))
             compliance_results[str(txn_id)] = result
+
+        # Post-process: detect repeat offenders by employee
+        employee_violations: dict[str, list[str]] = {}
+        for txn in transactions:
+            emp = txn.get("employee", "")
+            txn_id = txn.get("transaction_id", "")
+            if emp and compliance_results.get(txn_id, {}).get("status") == "Violation":
+                employee_violations.setdefault(emp, []).append(txn_id)
+
+        for emp, txn_ids in employee_violations.items():
+            if len(txn_ids) >= 2:
+                for txn_id in txn_ids:
+                    result = compliance_results.get(txn_id, {})
+                    repeat_count = txn_ids.index(txn_id) + 1
+                    existing = result.get("reasoning", "")
+                    result["reasoning"] = f"[Repeat offender: {repeat_count}/{len(txn_ids)} violation{'' if len(txn_ids) == 1 else 's'} for {emp}] {existing}"
+                    result["severity"] = "High"
+                    compliance_results[txn_id] = result
 
         return {"compliance_results": compliance_results}
 
@@ -83,24 +97,25 @@ async def evaluate_transactions(
     transactions: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     """Reusable entry point for compliance evaluation from other nodes."""
-    state = GraphState(
-        messages=[],
-        current_transactions=transactions,
-        compliance_results={},
-        report_payload={},
-        pending_approval=None,
-        user_query=None,
-        error=None,
-    )
-    result = await compliance_scanner_node(state)
-    return result.get("compliance_results", {})
+    return (await compliance_scanner_node({
+        "messages": [],
+        "current_transactions": transactions,
+        "compliance_results": {},
+        "report_payload": {},
+        "pending_approval": None,
+        "user_query": None,
+        "conversation_id": None,
+        "error": None,
+    })).get("compliance_results", {})
 
 
 async def _fetch_policy() -> dict | None:
     try:
         collection = await get_collection("company_policies")
-        policy = await collection.find_one({}, {"_id": 0})
-        return policy
+        pipeline = [{"$sample": {"size": 1}}, {"$project": {"_id": 0}}]
+        cursor = collection.aggregate(pipeline)
+        docs = await cursor.to_list(length=1)
+        return docs[0] if docs else None
     except Exception:
         return None
 
@@ -113,54 +128,38 @@ def _format_policy_text(policy: dict) -> str:
     return "\n\n".join(sections)
 
 
-async def _semantic_rule_search(transaction: dict) -> str:
-    """Search for semantically relevant custom rules."""
+async def _match_rules_by_code(transaction: dict) -> str:
+    """Match custom rules using transaction_code and department instead of vector search."""
     try:
         collection = await get_collection("custom_rules")
+        txn_code = transaction.get("transaction_code")
+        txn_dept = transaction.get("department", "")
+        txn_type = transaction.get("transaction_type", "")
 
-        # Build text to vectorize from transaction metadata
-        search_text = f"{transaction.get('merchant', '')} {transaction.get('category', '')} {transaction.get('department', '')} {transaction.get('description', '')} {transaction.get('amount', 0)}"
+        query: dict[str, Any] = {"$or": []}
 
-        text_embedding = await _get_embedding(search_text)
+        # Match by transaction code (most specific)
+        if txn_code:
+            query["$or"].append({"code": txn_code})
 
-        if text_embedding:
-            pipeline = [
-                {
-                    "$vectorSearch": {
-                        "index": "custom_rules_vector_index",
-                        "path": "rule_embedding",
-                        "queryVector": text_embedding,
-                        "numCandidates": 10,
-                        "limit": 5,
-                    }
-                },
-                {"$project": {"_id": 0, "text": 1, "department": 1, "category": 1}},
-            ]
-            cursor = collection.aggregate(pipeline)
-            rules = await cursor.to_list(length=5)
-            if rules:
-                return json.dumps(rules, default=str)
+        # Match by department
+        if txn_dept:
+            query["$or"].append({"department": txn_dept})
+            query["$or"].append({"department": "all"})
 
-        # Fallback: return recent rules
-        fallback = collection.find({}, {"_id": 0, "text": 1, "department": 1, "category": 1}).limit(3)
-        fallback_rules = await fallback.to_list(length=3)
-        return json.dumps(fallback_rules, default=str) if fallback_rules else "No custom rules found."
+        # Match by category/type
+        if txn_type:
+            query["$or"].append({"category": txn_type})
+            query["$or"].append({"category": "all"})
+
+        if not query["$or"]:
+            query = {"$or": [{"department": "all"}]}
+
+        cursor = collection.find(query, {"_id": 0, "text": 1, "department": 1, "category": 1, "code": 1, "severity": 1}).limit(10)
+        rules = await cursor.to_list(length=10)
+        return json.dumps(rules, default=str) if rules else "No matching rules found."
     except Exception:
         return "Rule search unavailable."
-
-
-async def _get_embedding(text: str) -> list[float] | None:
-    """Generate embedding using Gemini."""
-    try:
-        if genai is None:
-            return None
-        client = genai.Client(api_key=settings.gemini_api_key)
-        result = client.models.embed_content(
-            model="models/text-embedding-004", contents=text
-        )
-        return result.embeddings[0].values if result.embeddings else None
-    except Exception:
-        return None
 
 
 async def _evaluate_single(
@@ -176,7 +175,7 @@ async def _evaluate_single(
         client = genai.Client(api_key=settings.gemini_api_key)
 
         txn_str = json.dumps(
-            {k: v for k, v in transaction.items() if k != "_id"},
+            {k: v for k, v in transaction.items() if k not in ("_id", "items", "notes", "compliance_history")},
             default=str,
         )
 
@@ -197,7 +196,6 @@ async def _evaluate_single(
 
 
 def _parse_compliance_json(text: str, transaction: dict) -> dict:
-    """Robust parser for compliance LLM output."""
     json_match = re.search(r"\[.*?\]", text, re.DOTALL)
     if json_match:
         try:

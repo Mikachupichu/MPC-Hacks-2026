@@ -27,7 +27,7 @@ export default function ReportsPage() {
 
   // Load departments for the selector (simplified - just use known list)
   const departments = [
-    "all",
+    "All",
     "Engineering",
     "Marketing",
     "Sales",
@@ -250,6 +250,11 @@ export default function ReportsPage() {
               {report.sections.map((section, i) => (
                 <Card key={i}>
                   <Title>{section.title}</Title>
+                  {section.summary && (
+                    <div className="mt-2 mb-2 p-3 bg-blue-50 dark:bg-blue-950/40 rounded-md border-l-4 border-blue-500">
+                      <Text className="text-sm text-blue-800 dark:text-blue-200">{section.summary}</Text>
+                    </div>
+                  )}
                   <VisualBubble
                     title=""
                     visualizationType={section.visualization_type}

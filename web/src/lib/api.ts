@@ -6,6 +6,8 @@ import type {
   PendingApproval,
   ReportPayload,
   Transaction,
+  TransactionCode,
+  TransactionType,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -55,6 +57,7 @@ export async function scanCompliance(
 
 export async function createRule(rule: {
   text: string;
+  code?: number | null;
   department: string;
   category: string;
   severity: string;
@@ -107,20 +110,44 @@ export async function compileReport(params: {
 // Transactions
 export async function getTransactions(params: {
   department?: string;
-  category?: string;
+  transaction_type?: string;
+  transaction_code?: number;
   status?: string;
+  debit_or_credit?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 } = {}): Promise<{ transactions: Transaction[]; total: number }> {
   const searchParams = new URLSearchParams();
   if (params.department) searchParams.set("department", params.department);
-  if (params.category) searchParams.set("category", params.category);
+  if (params.transaction_type) searchParams.set("transaction_type", params.transaction_type);
+  if (params.transaction_code) searchParams.set("transaction_code", String(params.transaction_code));
   if (params.status) searchParams.set("status", params.status);
+  if (params.debit_or_credit) searchParams.set("debit_or_credit", params.debit_or_credit);
+  if (params.search) searchParams.set("search", params.search);
   if (params.limit) searchParams.set("limit", String(params.limit));
   if (params.offset) searchParams.set("offset", String(params.offset));
 
   const qs = searchParams.toString();
   return request(`/transactions${qs ? `?${qs}` : ""}`);
+}
+
+export async function createTransaction(txn: {
+  transaction_id: string;
+  transaction_code: number;
+  date: string;
+  merchant: string;
+  amount: number;
+  currency: string;
+  transaction_category: number;
+  description: string;
+  employee?: string;
+  merchant_category_code?: number | null;
+}): Promise<{ message: string; transaction: Transaction; auto_mapped: { department: string; transaction_type: string } }> {
+  return request("/transactions", {
+    method: "POST",
+    body: JSON.stringify(txn),
+  });
 }
 
 export async function getDepartments(): Promise<{
@@ -129,8 +156,14 @@ export async function getDepartments(): Promise<{
   return request("/transactions/departments");
 }
 
-export async function getCategories(): Promise<{
-  categories: { name: string; count: number; total: number; avg: number }[];
+export async function getTransactionCodes(): Promise<{
+  codes: TransactionCode[];
 }> {
-  return request("/transactions/categories");
+  return request("/transactions/codes");
+}
+
+export async function getTransactionTypes(): Promise<{
+  types: TransactionType[];
+}> {
+  return request("/transactions/types");
 }

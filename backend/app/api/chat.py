@@ -1,9 +1,8 @@
 import json
-from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
-from app.core.database import get_collection
 from app.graph.nodes.conversational_analyst import conversational_analyst_node
 from app.graph.state import GraphState
 from app.schemas.chat import ChatRequest, ChatResponse, VisualizationConfig
@@ -13,8 +12,10 @@ router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    """Feature 1: Talk to Your Data - conversational text-to-MQL + charting."""
+    """Feature 1: Talk to Your Data - with conversation memory."""
     try:
+        conversation_id = request.conversation_id or str(uuid4())
+
         state = GraphState(
             messages=[{"role": "user", "content": request.message}],
             current_transactions=[],
@@ -22,6 +23,7 @@ async def chat_endpoint(request: ChatRequest):
             report_payload={},
             pending_approval=None,
             user_query=request.message,
+            conversation_id=conversation_id,
             error=None,
         )
 
@@ -36,6 +38,7 @@ async def chat_endpoint(request: ChatRequest):
                 visualization_type="text",
                 config=VisualizationConfig(),
                 data=[],
+                conversation_id=conversation_id,
             )
 
         return ChatResponse(
@@ -43,6 +46,7 @@ async def chat_endpoint(request: ChatRequest):
             visualization_type=content.get("visualization_type", "text"),
             config=VisualizationConfig(**content.get("config", {})),
             data=content.get("data", []),
+            conversation_id=conversation_id,
         )
 
     except Exception as e:
@@ -56,6 +60,8 @@ async def chat_stream_endpoint(request: ChatRequest):
 
     async def event_stream():
         try:
+            conversation_id = request.conversation_id or str(uuid4())
+
             state = GraphState(
                 messages=[{"role": "user", "content": request.message}],
                 current_transactions=[],
@@ -63,6 +69,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                 report_payload={},
                 pending_approval=None,
                 user_query=request.message,
+                conversation_id=conversation_id,
                 error=None,
             )
 
@@ -72,9 +79,16 @@ async def chat_stream_endpoint(request: ChatRequest):
             content = last_msg.get("content", {})
 
             if isinstance(content, str):
-                yield f"data: {json.dumps({'type': 'text', 'content': content})}\n\n"
+                yield f"data: {json.dumps({'type': 'text', 'content': content, 'conversation_id': conversation_id})}\n\n"
             else:
-                yield f"data: {json.dumps({'type': 'result', **content, '_default_str': str})}\n\n"
+                payload = {
+                    "type": "result",
+                    "conversation_id": conversation_id,
+                    **content,
+                }
+                # Remove non-serializable keys
+                payload.pop("_default_str", None)
+                yield f"data: {json.dumps(payload, default=str)}\n\n"
 
             yield "data: [DONE]\n\n"
 
