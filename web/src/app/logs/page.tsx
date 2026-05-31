@@ -105,8 +105,8 @@ export default function LogsPage() {
                 <TableHeaderCell>Employee</TableHeaderCell>
                 <TableHeaderCell>Dept</TableHeaderCell>
                 <TableHeaderCell>Type</TableHeaderCell>
-                <TableHeaderCell>AI Rec.</TableHeaderCell>
-                <TableHeaderCell>Approval</TableHeaderCell>
+                <TableHeaderCell>Approval Status</TableHeaderCell>
+                <TableHeaderCell>Recommendation</TableHeaderCell>
                 <TableHeaderCell>Reasoning</TableHeaderCell>
               </TableRow>
             </TableHead>
@@ -149,18 +149,18 @@ export default function LogsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        <Badge size="xs" color={STATUS_COLORS[txn.approval_status] || "gray"}>
+                          {txn.approval_status === "not_required" ? "Not Required" : txn.approval_status.charAt(0).toUpperCase() + txn.approval_status.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         {txn.recommendation ? (
-                          <Badge size="xs" color={txn.recommendation === "Approve" ? "emerald" : txn.recommendation === "Decline" ? "red" : "yellow"}>
-                            {txn.recommendation}
+                          <Badge size="xs" color={txn.recommendation === "Approve" ? "emerald" : "red"}>
+                            {txn.recommendation === "Approve" ? "Approved" : "Declined"}
                           </Badge>
                         ) : (
                           <Badge size="xs" color="gray">—</Badge>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge size="xs" color={STATUS_COLORS[txn.approval_status] || "gray"}>
-                          {txn.approval_status === "not_required" ? "Not Required" : txn.approval_status.charAt(0).toUpperCase() + txn.approval_status.slice(1)}
-                        </Badge>
                       </TableCell>
                       <TableCell className="max-w-[260px] text-xs text-gray-500" title={txn.reasoning || ""}>
                         <span className="truncate block">

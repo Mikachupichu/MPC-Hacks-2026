@@ -166,6 +166,18 @@ async def conversational_analyst_node(state: GraphState) -> dict[str, Any]:
         viz_type = "text"
         config = {}
 
+    # If a pipeline ran and returned data but the LLM chose "text",
+    # coerce to table so the user always sees the numbers.
+    if data and viz_type == "text":
+        viz_type = "table"
+        if data:
+            keys = list(data[0].keys())
+            if keys:
+                x_key = keys[0]
+                numeric_keys = [k for k in keys[1:] if isinstance(data[0].get(k), (int, float))]
+                y_keys = numeric_keys if numeric_keys else keys[1:3]
+                config = {"x_key": x_key, "y_keys": y_keys, "colors": ["blue", "emerald", "amber"]}
+
     result = {
         "explanation": explanation,
         "visualization_type": viz_type,
