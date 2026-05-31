@@ -168,76 +168,42 @@ export default function LogsPage() {
                         </span>
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    transactions.map((txn) => (
-                      <TableRow key={txn.transaction_id}>
-                        <TableCell className="font-mono text-xs max-w-[100px] truncate">
-                          {txn.transaction_id}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">{txn.date}</TableCell>
-                        <TableCell className="max-w-[200px] truncate" title={txn.merchant}>
-                          {txn.merchant}
-                        </TableCell>
-                        <TableCell className="text-right font-mono whitespace-nowrap">
-                          ${txn.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell className="max-w-[120px] truncate" title={txn.employee}>
-                          {txn.employee || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge size="xs">{txn.department}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge size="xs" color="slate">
-                            {txn.transaction_type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge size="xs" color={STATUS_COLORS[txn.approval_status] || "gray"}>
-                            {txn.approval_status === "not_required" ? "Not Required" : txn.approval_status.charAt(0).toUpperCase() + txn.approval_status.slice(1)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-[280px] text-xs text-gray-500" title={txn.reasoning || ""}>
-                          <span className="truncate block">
-                            {txn.reasoning ?? "—"}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                  );
+                }))}
+            </TableBody>
+          </Table>
+        </div>
 
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <Text className="text-sm text-gray-500">
-                Showing {transactions.length} of {total.toLocaleString()} transactions
-              </Text>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  icon={ChevronLeft}
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                >
-                  Previous
-                </Button>
-                <Text className="text-sm">
-                  Page {currentPage} of {Math.max(1, totalPages)}
-                </Text>
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  icon={ChevronRight}
-                  disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => setOffset(offset + PAGE_SIZE)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          </Card>
+        {/* Pagination */}
+        <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <Text className="text-sm text-gray-500">
+            Showing {transactions.length} of {total.toLocaleString()} transactions
+          </Text>
+          <div className="flex items-center gap-2">
+            <Button
+              size="xs"
+              variant="secondary"
+              icon={ChevronLeft}
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              Previous
+            </Button>
+            <Text className="text-sm">
+              Page {currentPage} of {Math.max(1, totalPages)}
+            </Text>
+            <Button
+              size="xs"
+              variant="secondary"
+              icon={ChevronRight}
+              disabled={offset + PAGE_SIZE >= total}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      </Card>
         </div>
       </AeroWindow>
     </div>
