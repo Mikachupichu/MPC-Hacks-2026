@@ -7,9 +7,8 @@ import {
   Text,
   Button,
   TextInput,
-  Select,
-  SelectItem,
 } from "@tremor/react";
+import Dropdown, { DropdownItem } from "@/components/Dropdown";
 import { toast } from "sonner";
 import { createTransaction } from "@/lib/api";
 
@@ -85,7 +84,7 @@ export default function TransactionForm() {
   };
 
   return (
-    <Card>
+    <Card className="p-4">
       <Title>Add New Transaction</Title>
       <Text className="mt-1">
         Departments and categories are automatically mapped to transaction codes and types.
@@ -95,16 +94,13 @@ export default function TransactionForm() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Department</label>
-            <Select
-              value={department}
-              onValueChange={setDepartment}
-            >
+            <Dropdown value={department} onValueChange={setDepartment} placeholder="Select Department">
               {Object.keys(DEPT_TO_CODE).map((dept) => (
-                <SelectItem key={dept} value={dept}>
+                <DropdownItem key={dept} value={dept}>
                   {dept}
-                </SelectItem>
+                </DropdownItem>
               ))}
-            </Select>
+            </Dropdown>
             <Text className="text-xs text-gray-500 mt-1">
               Code: <strong>{transactionCode}</strong> &middot; Dept: <strong>{department}</strong>
             </Text>
@@ -112,16 +108,17 @@ export default function TransactionForm() {
 
           <div>
             <label className="block text-sm font-medium mb-1">Transaction Category</label>
-            <Select
+            <Dropdown
               value={String(transactionCategory)}
               onValueChange={(v) => setTransactionCategory(Number(v))}
+              placeholder="Select Category"
             >
               {Object.entries(CATEGORY_TYPE_MAP).map(([cat, type]) => (
-                <SelectItem key={cat} value={cat}>
+                <DropdownItem key={cat} value={cat}>
                   {type}
-                </SelectItem>
+                </DropdownItem>
               ))}
-            </Select>
+            </Dropdown>
             <Text className="text-xs text-gray-500 mt-1">
               Auto-maps to type: <strong>{autoType}</strong>
             </Text>
@@ -174,10 +171,10 @@ export default function TransactionForm() {
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Currency</label>
-            <Select value={currency} onValueChange={setCurrency}>
-              <SelectItem value="CAD">CAD</SelectItem>
-              <SelectItem value="USD">USD</SelectItem>
-            </Select>
+            <Dropdown value={currency} onValueChange={setCurrency} placeholder="Currency">
+              <DropdownItem value="CAD">CAD</DropdownItem>
+              <DropdownItem value="USD">USD</DropdownItem>
+            </Dropdown>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">City</label>

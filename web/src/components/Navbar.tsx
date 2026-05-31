@@ -21,27 +21,27 @@ export default function Navbar() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/80 backdrop-blur-sm dark:border-gray-800 dark:bg-gray-950/80">
+    <header className="sticky top-0 z-50 w-full relative border-b border-transparent bg-transparent aero-navbar">
       <div className="flex h-14 items-center px-4 max-w-7xl mx-auto">
         <Link
           href="/"
           className="flex items-center gap-2 font-semibold mr-8"
         >
-          <CreditCard className="h-5 w-5 text-blue-600" />
+          <CreditCard className="h-5 w-5 text-black" />
           <span className="hidden sm:inline">Aero Intel</span>
         </Link>
 
         <nav className="flex items-center gap-1">
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href;
-            return (
+              return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                   isActive
-                    ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800"
+                    ? "bg-white/10 text-white dark:bg-white/10 dark:text-white"
+                    : "text-white hover:text-white hover:bg-white/10 dark:text-white dark:hover:text-white dark:hover:bg-white/10"
                 }`}
               >
                 <item.icon className="h-4 w-4" />

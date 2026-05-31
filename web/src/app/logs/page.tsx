@@ -13,10 +13,10 @@ import {
   TableHeaderCell,
   TableRow,
   TextInput,
-  Select,
-  SelectItem,
   Button,
 } from "@tremor/react";
+import Dropdown, { DropdownItem } from "@/components/Dropdown";
+import AeroWindow from "@/components/AeroWindow";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { getTransactions } from "@/lib/api";
 import type { Transaction } from "@/lib/types";
@@ -45,11 +45,13 @@ export default function LogsPage() {
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
+
     try {
       const params: Record<string, string | number | undefined> = {
         limit: PAGE_SIZE,
         offset,
       };
+
       if (filters.department) params.department = filters.department;
       if (filters.transaction_type) params.transaction_type = filters.transaction_type;
       if (filters.status) params.status = filters.status;
@@ -57,7 +59,6 @@ export default function LogsPage() {
       if (filters.search.trim()) params.search = filters.search.trim();
 
       const data = await getTransactions(params);
-
       setTransactions(data.transactions);
       setTotal(data.total);
     } catch {
@@ -65,7 +66,7 @@ export default function LogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [offset, filters]);
+  }, [filters, offset]);
 
   useEffect(() => {
     fetchTransactions();
@@ -80,87 +81,16 @@ export default function LogsPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-      <div>
-        <Title>Transaction Logs</Title>
-        <Text className="mt-1">
-          View all {total.toLocaleString()} transactions in the database.
-          Transactions under $50 are marked as <Badge color="gray">Not Required</Badge> per policy.
-        </Text>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div className="w-full px-4 py-8">
+      <AeroWindow title="Transaction Logs" className="mx-auto">
+        <div className="space-y-6">
           <div>
-            <label className="block text-xs font-medium mb-1">Search</label>
-            <TextInput
-              placeholder="Merchant, description, ID..."
-              value={filters.search}
-              onChange={(e) => handleFilterChange("search", e.target.value)}
-              icon={Search}
-            />
+            <Title>Transaction Logs</Title>
+            <Text className="mt-1">
+              View all {total.toLocaleString()} transactions in the database.
+              Transactions under $50 are marked as <Badge color="gray">Not Required</Badge> per policy.
+            </Text>
           </div>
-          <div>
-            <label className="block text-xs font-medium mb-1">Department</label>
-            <Select
-              value={filters.department}
-              onValueChange={(v) => handleFilterChange("department", v)}
-            >
-              <SelectItem value="">All</SelectItem>
-              <SelectItem value="Operations">Operations</SelectItem>
-              <SelectItem value="Finance">Finance</SelectItem>
-              <SelectItem value="Engineering">Engineering</SelectItem>
-              <SelectItem value="Marketing">Marketing</SelectItem>
-              <SelectItem value="Sales">Sales</SelectItem>
-              <SelectItem value="HR">HR</SelectItem>
-              <SelectItem value="Product">Product</SelectItem>
-            </Select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1">Type</label>
-            <Select
-              value={filters.transaction_type}
-              onValueChange={(v) => handleFilterChange("transaction_type", v)}
-            >
-              <SelectItem value="">All</SelectItem>
-              <SelectItem value="Fuel">Fuel</SelectItem>
-              <SelectItem value="Permit">Permit</SelectItem>
-              <SelectItem value="Toll">Toll</SelectItem>
-              <SelectItem value="Vehicle Maintenance">Vehicle Maintenance</SelectItem>
-              <SelectItem value="Car Wash">Car Wash</SelectItem>
-              <SelectItem value="Payment">Payment</SelectItem>
-              <SelectItem value="Cash Advance">Cash Advance</SelectItem>
-              <SelectItem value="Card Fee">Card Fee</SelectItem>
-              <SelectItem value="Equipment">Equipment</SelectItem>
-            </Select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1">Status</label>
-            <Select
-              value={filters.status}
-              onValueChange={(v) => handleFilterChange("status", v)}
-            >
-              <SelectItem value="">All</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="denied">Denied</SelectItem>
-              <SelectItem value="not_required">Not Required</SelectItem>
-            </Select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1">Type</label>
-            <Select
-              value={filters.debit_or_credit}
-              onValueChange={(v) => handleFilterChange("debit_or_credit", v)}
-            >
-              <SelectItem value="">All</SelectItem>
-              <SelectItem value="Debit">Debit</SelectItem>
-              <SelectItem value="Credit">Credit</SelectItem>
-            </Select>
-          </div>
-        </div>
-      </Card>
 
       {/* Transaction Table */}
       <Card>
@@ -238,43 +168,78 @@ export default function LogsPage() {
                         </span>
                       </TableCell>
                     </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                  ) : (
+                    transactions.map((txn) => (
+                      <TableRow key={txn.transaction_id}>
+                        <TableCell className="font-mono text-xs max-w-[100px] truncate">
+                          {txn.transaction_id}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{txn.date}</TableCell>
+                        <TableCell className="max-w-[200px] truncate" title={txn.merchant}>
+                          {txn.merchant}
+                        </TableCell>
+                        <TableCell className="text-right font-mono whitespace-nowrap">
+                          ${txn.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="max-w-[120px] truncate" title={txn.employee}>
+                          {txn.employee || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge size="xs">{txn.department}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge size="xs" color="slate">
+                            {txn.transaction_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge size="xs" color={STATUS_COLORS[txn.approval_status] || "gray"}>
+                            {txn.approval_status === "not_required" ? "Not Required" : txn.approval_status.charAt(0).toUpperCase() + txn.approval_status.slice(1)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[280px] text-xs text-gray-500" title={txn.reasoning || ""}>
+                          <span className="truncate block">
+                            {txn.reasoning ?? "—"}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <Text className="text-sm text-gray-500">
-            Showing {transactions.length} of {total.toLocaleString()} transactions
-          </Text>
-          <div className="flex items-center gap-2">
-            <Button
-              size="xs"
-              variant="secondary"
-              icon={ChevronLeft}
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            >
-              Previous
-            </Button>
-            <Text className="text-sm">
-              Page {currentPage} of {Math.max(1, totalPages)}
-            </Text>
-            <Button
-              size="xs"
-              variant="secondary"
-              icon={ChevronRight}
-              disabled={offset + PAGE_SIZE >= total}
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-            >
-              Next
-            </Button>
-          </div>
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <Text className="text-sm text-gray-500">
+                Showing {transactions.length} of {total.toLocaleString()} transactions
+              </Text>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  icon={ChevronLeft}
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                >
+                  Previous
+                </Button>
+                <Text className="text-sm">
+                  Page {currentPage} of {Math.max(1, totalPages)}
+                </Text>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  icon={ChevronRight}
+                  disabled={offset + PAGE_SIZE >= total}
+                  onClick={() => setOffset(offset + PAGE_SIZE)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </Card>
         </div>
-      </Card>
+      </AeroWindow>
     </div>
   );
 }
