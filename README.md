@@ -35,6 +35,8 @@ These must be installed on your machine before the project will run:
 
 ### Frontend setup
 
+shadcn/ui and Tremor are already included as npm dependencies — no extra install needed.
+
 1. Open a terminal and navigate to the frontend folder:
 
     ```bash
@@ -133,6 +135,8 @@ These must be installed on your machine before the project will run:
     npm install
     npm run dev
     ```
+
+**Note:** The backend will start even without MongoDB running, but you'll see a warning. Database routes won't work until MongoDB is available.
 
 ## License
 

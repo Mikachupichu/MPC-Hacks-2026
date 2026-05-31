@@ -1,14 +1,108 @@
-export default function Home() {
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { Button, TextInput, Card, Title, Text } from "@tremor/react";
+import { Send, Loader2 } from "lucide-react";
+import ChatMessage from "@/components/ChatMessage";
+import VisualBubble from "@/components/VisualBubble";
+import { sendChatMessage } from "@/lib/api";
+import type { ChatMessage as ChatMessageType } from "@/lib/types";
+
+export default function ChatDashboard() {
+  const [messages, setMessages] = useState<ChatMessageType[]>([
+    {
+      role: "assistant",
+      content:
+        "Hi! I'm your expense intelligence assistant. Ask me anything about your company's spending — for example:\n\n- What did Marketing spend on software last quarter?\n- Show me travel expenses by department\n- How much did Engineering spend on AWS?\n- Compare spending across departments",
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = async () => {
+    const query = input.trim();
+    if (!query || loading) return;
+
+    setInput("");
+    setLoading(true);
+
+    const userMessage: ChatMessageType = { role: "user", content: query };
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      const response = await sendChatMessage(query);
+
+      // Add visualization bubble as a separate message if data exists
+      const assistantResponse: ChatMessageType = {
+        role: "assistant",
+        content: response,
+      };
+
+      setMessages((prev) => [...prev, assistantResponse]);
+    } catch (error) {
+      const errorMessage: ChatMessageType = {
+        role: "assistant",
+        content: `Sorry, I encountered an error: ${error}. Please try rephrasing your question.`,
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center">
-      <main className="flex flex-1 w-full max-w-5xl flex-col items-center justify-center py-16 px-8">
-        <h1 className="text-5xl font-bold tracking-tight mb-4">
-          MPC Hacks 2026
-        </h1>
-        <p className="text-lg text-muted-foreground mb-8">
-          Build something great.
-        </p>
-      </main>
+    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-5xl mx-auto w-full px-4">
+      <div className="py-4 border-b border-gray-200 dark:border-gray-700">
+        <Title>Talk to Your Data</Title>
+        <Text>Ask questions about your company spending in plain English</Text>
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-4 space-y-4">
+        {messages.map((msg, i) => (
+          <ChatMessage key={i} message={msg} />
+        ))}
+
+        {loading && (
+          <div className="flex items-center gap-2 text-gray-500 pl-10">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <Text>Analyzing your data...</Text>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="py-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex gap-2">
+          <TextInput
+            placeholder="Ask about your expenses..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={loading}
+            className="flex-1"
+          />
+          <Button
+            onClick={handleSend}
+            disabled={loading || !input.trim()}
+            icon={Send}
+          >
+            Send
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
