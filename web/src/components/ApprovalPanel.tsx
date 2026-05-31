@@ -96,6 +96,21 @@ export default function ApprovalPanel() {
                             <Badge color={isViolation ? "red" : "emerald"} size="xs">
                               {compliance?.status || "Pending"}
                             </Badge>
+                            {compliance?.recommendation && (
+                              <Badge
+                                color={compliance.recommendation === "Approve" ? "emerald" : compliance.recommendation === "Decline" ? "red" : "yellow"}
+                                size="xs"
+                                title="AI agent recommendation"
+                              >
+                                AI: {compliance.recommendation}
+                              </Badge>
+                            )}
+                            {txn.approval_status === "approved" && (
+                              <Badge color="blue" size="xs">Approved by you</Badge>
+                            )}
+                            {txn.approval_status === "denied" && (
+                              <Badge color="gray" size="xs">Declined by you</Badge>
+                            )}
                             {isViolation && <AlertTriangle className="h-4 w-4 text-red-500" />}
                           </div>
                           <Text className="text-sm text-gray-500 mt-0.5">
@@ -168,12 +183,22 @@ export default function ApprovalPanel() {
                         </Col>
                       </Grid>
 
-                      {/* AI Recommendation */}
+                      {/* AI Recommendation & Reasoning */}
                       {compliance?.reasoning && (
                         <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950/40 rounded-md border-l-4 border-blue-500 text-sm">
-                          <Text className="font-medium text-xs text-blue-700 dark:text-blue-300 uppercase tracking-wide mb-1">
-                            AI Recommendation
-                          </Text>
+                          <div className="flex items-center gap-2 mb-1">
+                            <Text className="font-medium text-xs text-blue-700 dark:text-blue-300 uppercase tracking-wide">
+                              AI Recommendation
+                            </Text>
+                            {compliance.recommendation && (
+                              <Badge
+                                size="xs"
+                                color={compliance.recommendation === "Approve" ? "emerald" : compliance.recommendation === "Decline" ? "red" : "yellow"}
+                              >
+                                {compliance.recommendation}
+                              </Badge>
+                            )}
+                          </div>
                           <Text className="text-blue-900 dark:text-blue-100">{compliance.reasoning}</Text>
                         </div>
                       )}

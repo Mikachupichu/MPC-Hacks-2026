@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 from app.core.database import get_collection
+from app.core.time_range import get_app_cutoff_date
 from app.graph.nodes.compliance_scanner import evaluate_transactions
 from app.schemas.compliance import (
     ComplianceRule,
@@ -36,6 +37,10 @@ async def compliance_scan(request: ComplianceScanRequest):
             query["transaction_id"] = {"$in": request.transaction_ids}
         if request.department:
             query["department"] = request.department
+
+        # Apply app-wide time range filter
+        cutoff = await get_app_cutoff_date()
+        query["date"] = {"$gte": cutoff}
 
         cursor = collection.find(query).limit(100)
         transactions = await cursor.to_list(length=100)
@@ -160,7 +165,10 @@ async def list_rules():
 
 
 async def _reevaluate_matching_transactions(rule_text: str, department: str, category: str):
-    """Re-evaluate transactions that match this rule's department and category."""
+    """Re-evaluate transactions that match this rule's department and category.
+
+    Only transactions within the app-wide time range are re-evaluated.
+    """
     try:
         collection = await get_collection("transactions")
 
@@ -173,6 +181,10 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
             query["department"] = {"$in": dept_list}
         if cat_list:
             query["transaction_type"] = {"$in": cat_list}
+
+        # Apply app-wide time range filter — transactions outside the window are frozen
+        cutoff = await get_app_cutoff_date()
+        query["date"] = {"$gte": cutoff}
 
         cursor = collection.find(query).limit(200)
         transactions = await cursor.to_list(length=200)
@@ -198,12 +210,12 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
             new_reasoning = eval_result.get("reasoning", "")
 
             if current_status == "approved":
-                # Change to pending with new reasoning
                 await collection.update_one(
                     {"transaction_id": txn_id},
                     {
                         "$set": {
                             "approval_status": "pending",
+                            "recommendation": "Decline",
                             "reasoning": new_reasoning,
                         },
                         "$push": {
@@ -217,13 +229,13 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
                     },
                 )
             elif current_status == "denied":
-                # Append to existing reasoning
                 existing = txn.get("reasoning", "")
+                existing_rec = txn.get("recommendation", "Decline")
                 update_reasoning = f"{existing} | Additional violation: {rule_text}. {new_reasoning}"
                 await collection.update_one(
                     {"transaction_id": txn_id},
                     {
-                        "$set": {"reasoning": update_reasoning},
+                        "$set": {"reasoning": update_reasoning, "recommendation": existing_rec},
                         "$push": {
                             "compliance_history": {
                                 "scanned_at": datetime.now(),
@@ -235,11 +247,10 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
                     },
                 )
             elif current_status == "pending":
-                # Keep pending but update reasoning
                 await collection.update_one(
                     {"transaction_id": txn_id},
                     {
-                        "$set": {"reasoning": new_reasoning},
+                        "$set": {"reasoning": new_reasoning, "recommendation": "Decline"},
                         "$push": {
                             "compliance_history": {
                                 "scanned_at": datetime.now(),
@@ -291,7 +302,8 @@ async def _evaluate_against_rule(
                 f"Be strict — if the transaction clearly violates the rule, flag it.\n\n"
                 f"Respond with a JSON array of only the violations:\n"
                 f"[{{\"transaction_id\":\"...\", \"status\":\"Violation\", \"severity\":\"Low\"|\"Medium\"|\"High\", "
-                f"\"reasoning\":\"Recommendation: Pending — <explanation>\"}}]\n\n"
+                f"\"recommendation\":\"Decline\", "
+                f"\"reasoning\":\"<explanation>\"}}]\n\n"
                 f"Return an empty array [] if none violate.\n\n"
                 f"Transactions:\n{json.dumps(batch_json, default=str)}"
             )

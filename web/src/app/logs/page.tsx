@@ -92,109 +92,80 @@ export default function LogsPage() {
             </Text>
           </div>
 
-          <Card className="p-4">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div>
-                <label className="block text-xs font-medium mb-1">Search</label>
-                <TextInput
-                  placeholder="Merchant, description, ID..."
-                  value={filters.search}
-                  onChange={(e) => handleFilterChange("search", e.target.value)}
-                  icon={Search}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Department</label>
-                <Dropdown
-                  value={filters.department}
-                  onValueChange={(v) => handleFilterChange("department", v)}
-                  placeholder="All"
-                >
-                  <DropdownItem value="">All</DropdownItem>
-                  <DropdownItem value="Operations">Operations</DropdownItem>
-                  <DropdownItem value="Finance">Finance</DropdownItem>
-                  <DropdownItem value="Engineering">Engineering</DropdownItem>
-                  <DropdownItem value="Marketing">Marketing</DropdownItem>
-                  <DropdownItem value="Sales">Sales</DropdownItem>
-                  <DropdownItem value="HR">HR</DropdownItem>
-                  <DropdownItem value="Product">Product</DropdownItem>
-                </Dropdown>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Type</label>
-                <Dropdown
-                  value={filters.transaction_type}
-                  onValueChange={(v) => handleFilterChange("transaction_type", v)}
-                  placeholder="All"
-                >
-                  <DropdownItem value="">All</DropdownItem>
-                  <DropdownItem value="Fuel">Fuel</DropdownItem>
-                  <DropdownItem value="Permit">Permit</DropdownItem>
-                  <DropdownItem value="Toll">Toll</DropdownItem>
-                  <DropdownItem value="Vehicle Maintenance">Vehicle Maintenance</DropdownItem>
-                  <DropdownItem value="Car Wash">Car Wash</DropdownItem>
-                  <DropdownItem value="Payment">Payment</DropdownItem>
-                  <DropdownItem value="Cash Advance">Cash Advance</DropdownItem>
-                  <DropdownItem value="Card Fee">Card Fee</DropdownItem>
-                  <DropdownItem value="Equipment">Equipment</DropdownItem>
-                </Dropdown>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Status</label>
-                <Dropdown
-                  value={filters.status}
-                  onValueChange={(v) => handleFilterChange("status", v)}
-                  placeholder="All"
-                >
-                  <DropdownItem value="">All</DropdownItem>
-                  <DropdownItem value="approved">Approved</DropdownItem>
-                  <DropdownItem value="pending">Pending</DropdownItem>
-                  <DropdownItem value="denied">Denied</DropdownItem>
-                  <DropdownItem value="not_required">Not Required</DropdownItem>
-                </Dropdown>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Type</label>
-                <Dropdown
-                  value={filters.debit_or_credit}
-                  onValueChange={(v) => handleFilterChange("debit_or_credit", v)}
-                  placeholder="All"
-                >
-                  <DropdownItem value="">All</DropdownItem>
-                  <DropdownItem value="Debit">Debit</DropdownItem>
-                  <DropdownItem value="Credit">Credit</DropdownItem>
-                </Dropdown>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableHeaderCell>ID</TableHeaderCell>
-                    <TableHeaderCell>Date</TableHeaderCell>
-                    <TableHeaderCell>Merchant</TableHeaderCell>
-                    <TableHeaderCell>Amount</TableHeaderCell>
-                    <TableHeaderCell>Employee</TableHeaderCell>
-                    <TableHeaderCell>Dept</TableHeaderCell>
-                    <TableHeaderCell>Type</TableHeaderCell>
-                    <TableHeaderCell>Status</TableHeaderCell>
-                    <TableHeaderCell>Reasoning</TableHeaderCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8">
-                        <Text>Loading transactions...</Text>
+      {/* Transaction Table */}
+      <Card>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>ID</TableHeaderCell>
+                <TableHeaderCell>Date</TableHeaderCell>
+                <TableHeaderCell>Merchant</TableHeaderCell>
+                <TableHeaderCell>Amount</TableHeaderCell>
+                <TableHeaderCell>Employee</TableHeaderCell>
+                <TableHeaderCell>Dept</TableHeaderCell>
+                <TableHeaderCell>Type</TableHeaderCell>
+                <TableHeaderCell>AI Rec.</TableHeaderCell>
+                <TableHeaderCell>Approval</TableHeaderCell>
+                <TableHeaderCell>Reasoning</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-8">
+                    <Text>Loading transactions...</Text>
+                  </TableCell>
+                </TableRow>
+              ) : transactions.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-8">
+                    <Text>No transactions found matching your filters.</Text>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                transactions.map((txn) => {
+                  return (
+                    <TableRow key={txn.transaction_id}>
+                      <TableCell className="font-mono text-xs max-w-[100px] truncate">
+                        {txn.transaction_id}
                       </TableCell>
-                    </TableRow>
-                  ) : transactions.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8">
-                        <Text>No transactions found matching your filters.</Text>
+                      <TableCell className="whitespace-nowrap">{txn.date}</TableCell>
+                      <TableCell className="max-w-[200px] truncate" title={txn.merchant}>
+                        {txn.merchant}
+                      </TableCell>
+                      <TableCell className="text-right font-mono whitespace-nowrap">
+                        ${txn.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell className="max-w-[120px] truncate" title={txn.employee}>
+                        {txn.employee || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge size="xs">{txn.department}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge size="xs" color="slate">
+                          {txn.transaction_type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {txn.recommendation ? (
+                          <Badge size="xs" color={txn.recommendation === "Approve" ? "emerald" : txn.recommendation === "Decline" ? "red" : "yellow"}>
+                            {txn.recommendation}
+                          </Badge>
+                        ) : (
+                          <Badge size="xs" color="gray">—</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge size="xs" color={STATUS_COLORS[txn.approval_status] || "gray"}>
+                          {txn.approval_status === "not_required" ? "Not Required" : txn.approval_status.charAt(0).toUpperCase() + txn.approval_status.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-[260px] text-xs text-gray-500" title={txn.reasoning || ""}>
+                        <span className="truncate block">
+                          {txn.reasoning ?? "—"}
+                        </span>
                       </TableCell>
                     </TableRow>
                   ) : (

@@ -32,7 +32,9 @@ export interface Transaction {
   tags: string[];
   compliance_history: ComplianceRecord[];
   approval_status: "pending" | "approved" | "denied" | "not_required";
+  recommendation: string | null;
   reasoning: string | null;
+  ai_recommendation?: string | null;
   payment_method: "corporate_card" | "personal";
   is_reimbursable: boolean;
   merchant_city?: string;
@@ -53,6 +55,7 @@ export interface ComplianceResult {
   transaction_id: string;
   status: "Compliant" | "Violation";
   severity: "Low" | "Medium" | "High";
+  recommendation?: string | null;
   reasoning: string;
 }
 

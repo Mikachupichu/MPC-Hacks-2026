@@ -232,80 +232,84 @@ FINANCE_EMPLOYEES = [
     "Patricia Adams",
 ]
 
-# Reasonings — every string starts with "Recommendation: Approve" or "Recommendation: Decline"
+# Recommendation constants — the AI agent's recommendation is always binary
+RECOMMEND_APPROVE = "Approve"
+RECOMMEND_DECLINE = "Decline"
+
+# Reasoning text only (no recommendation prefix — stored separately in `recommendation` field)
 APPROVED_REASONINGS = {
     "Fuel": [
-        "Recommendation: Approve — Routine fleet fueling expense at company-approved station within budget.",
-        "Recommendation: Approve — Fuel cost aligns with standard route distance and vehicle consumption benchmarks.",
-        "Recommendation: Approve — Bulk fuel purchase at negotiated fleet rate, within policy limits.",
-        "Recommendation: Approve — Regular fuel stop on authorized route; amount consistent with prior trips.",
+        "Routine fleet fueling expense at company-approved station within budget.",
+        "Fuel cost aligns with standard route distance and vehicle consumption benchmarks.",
+        "Bulk fuel purchase at negotiated fleet rate, within policy limits.",
+        "Regular fuel stop on authorized route; amount consistent with prior trips.",
     ],
     "Permit": [
-        "Recommendation: Approve — Required regulatory permit for interstate hauling at standard rate.",
-        "Recommendation: Approve — State-required oversize/overweight permit compliant with policy.",
-        "Recommendation: Approve — Annual permit renewal at standard regulatory fee schedule.",
+        "Required regulatory permit for interstate hauling at standard rate.",
+        "State-required oversize/overweight permit compliant with policy.",
+        "Annual permit renewal at standard regulatory fee schedule.",
     ],
     "Toll": [
-        "Recommendation: Approve — Standard toll charge on authorized freight route.",
-        "Recommendation: Approve — Bridge/corridor toll for contracted delivery route, within expected range.",
+        "Standard toll charge on authorized freight route.",
+        "Bridge/corridor toll for contracted delivery route, within expected range.",
     ],
     "Vehicle Maintenance": [
-        "Recommendation: Approve — Preventive maintenance per fleet schedule; amount within service range.",
-        "Recommendation: Approve — Repair cost justified by fleet vehicle inspection report and under threshold.",
+        "Preventive maintenance per fleet schedule; amount within service range.",
+        "Repair cost justified by fleet vehicle inspection report and under threshold.",
     ],
     "Car Wash": [
-        "Recommendation: Approve — Fleet vehicle wash at approved vendor at standard cost.",
-        "Recommendation: Approve — Routine fleet cleaning per company maintenance policy.",
+        "Fleet vehicle wash at approved vendor at standard cost.",
+        "Routine fleet cleaning per company maintenance policy.",
     ],
     "Payment": [
-        "Recommendation: Approve — Scheduled EFT payment fully documented and authorized.",
-        "Recommendation: Approve — Monthly payment batch processed with dual authorization.",
+        "Scheduled EFT payment fully documented and authorized.",
+        "Monthly payment batch processed with dual authorization.",
     ],
     "Card Fee": [
-        "Recommendation: Approve — Standard annual card fee per corporate card agreement.",
-        "Recommendation: Approve — Authorized user fee for approved team member.",
+        "Standard annual card fee per corporate card agreement.",
+        "Authorized user fee for approved team member.",
     ],
     "Cash Advance": [
-        "Recommendation: Approve — Driver cash advance for on-road expenses within $500 limit.",
-        "Recommendation: Approve — Trip cash advance reconciled with prior trip receipts.",
+        "Driver cash advance for on-road expenses within $500 limit.",
+        "Trip cash advance reconciled with prior trip receipts.",
     ],
     "default": [
-        "Recommendation: Approve — Transaction meets all policy requirements and amount is within limits.",
-        "Recommendation: Approve — Expense category and amount are standard business costs for this department.",
+        "Transaction meets all policy requirements and amount is within limits.",
+        "Expense category and amount are standard business costs for this department.",
     ],
 }
-DENIED_REASONINGS = {
+DECLINED_REASONINGS = {
     "Fuel": [
-        "Recommendation: Decline — Fuel amount exceeds single-transaction policy limit without authorization.",
-        "Recommendation: Decline — Duplicate fuel purchase flagged — possible personal use detected.",
-        "Recommendation: Decline — Fuel purchase at unauthorized vendor not on company preferred list.",
+        "Fuel amount exceeds single-transaction policy limit without authorization.",
+        "Duplicate fuel purchase flagged — possible personal use detected.",
+        "Fuel purchase at unauthorized vendor not on company preferred list.",
     ],
     "Permit": [
-        "Recommendation: Decline — Permit fee unusually high for standard route; exceeds typical cost by significant margin.",
+        "Permit fee unusually high for standard route; exceeds typical cost by significant margin.",
     ],
     "Cash Advance": [
-        "Recommendation: Decline — Cash advance exceeds $500 per-trip limit without pre-approval.",
-        "Recommendation: Decline — Outstanding cash advances not reconciled; new advance denied pending resolution.",
+        "Cash advance exceeds $500 per-trip limit without pre-approval.",
+        "Outstanding cash advances not reconciled; new advance denied pending resolution.",
     ],
     "default": [
-        "Recommendation: Decline — Amount exceeds department spending threshold without pre-approval.",
-        "Recommendation: Decline — Transaction flagged for policy violation: exceeds authorization limit.",
-        "Recommendation: Decline — Category not within approved expense guidelines for this department.",
+        "Amount exceeds department spending threshold without pre-approval.",
+        "Transaction flagged for policy violation: exceeds authorization limit.",
+        "Category not within approved expense guidelines for this department.",
     ],
 }
 PENDING_REASONINGS = {
     "Fuel": [
-        "Recommendation: Pending — Large fuel transaction requires review against monthly budget cap.",
-        "Recommendation: Pending — Cross-border fuel purchase flagged for currency conversion review.",
+        "Large fuel transaction requires review against monthly budget cap.",
+        "Cross-border fuel purchase flagged for currency conversion review.",
     ],
     "Equipment": [
-        "Recommendation: Pending — Equipment purchase over $2,000 requires department head approval.",
-        "Recommendation: Pending — Capital expense threshold triggered; awaiting manager sign-off.",
+        "Equipment purchase over $2,000 requires department head approval.",
+        "Capital expense threshold triggered; awaiting manager sign-off.",
     ],
     "default": [
-        "Recommendation: Pending — High-value transaction flagged for manager approval per policy.",
-        "Recommendation: Pending — Amount exceeds $2,000 automatic approval threshold; awaiting finance team review.",
-        "Recommendation: Pending — Unusual pattern detected; pending finance team review.",
+        "High-value transaction flagged for manager approval per policy.",
+        "Amount exceeds $2,000 automatic approval threshold; awaiting finance team review.",
+        "Unusual pattern detected; pending finance team review.",
     ],
 }
 
@@ -324,32 +328,48 @@ def _generate_reasoning(
     merchant: str,
     country: str,
     status: str,
-) -> str:
-    """Generate a plausible AI reasoning text with clear recommendation."""
+) -> tuple[str | None, str | None]:
+    """Generate (recommendation, reasoning) tuple.
+
+    recommendation: "Approve" | "Decline" | None
+    reasoning: Human-readable explanation without recommendation prefix
+
+    For pending transactions, the AI still makes a binary recommendation:
+    - "Approve" = transaction is fine, just needs human sign-off on amount
+    - "Decline" = transaction looks concerning and should not be approved
+    """
     if status == "approved":
         choices = APPROVED_REASONINGS.get(transaction_type) or APPROVED_REASONINGS["default"]
+        rec = RECOMMEND_APPROVE
     elif status == "denied":
-        choices = DENIED_REASONINGS.get(transaction_type) or DENIED_REASONINGS["default"]
+        choices = DECLINED_REASONINGS.get(transaction_type) or DECLINED_REASONINGS["default"]
+        rec = RECOMMEND_DECLINE
     else:
         choices = PENDING_REASONINGS.get(transaction_type) or PENDING_REASONINGS["default"]
+        # Determine recommendation based on reasoning — suspicious patterns get Decline
+        base = random.choice(choices)
+        if "Unusual" in base or "currency conversion" in base:
+            rec = RECOMMEND_DECLINE
+        elif amount > 10000:
+            rec = RECOMMEND_DECLINE
+        else:
+            rec = RECOMMEND_APPROVE
+        return rec, base.strip()
 
     base = random.choice(choices)
 
-    # Add contextual detail for high-value pending
-    if status == "pending" and amount > 10000:
-        return f"Recommendation: Pending — CFO approval required. ${amount:,.2f} transaction exceeds $10,000 threshold. Additional context: high-value transaction flagged for executive review."
     # Add USD context for approved
     if status == "approved" and country == "USA":
         usd_choices = [
             " USD transaction reviewed — conversion rate applied correctly at {:.4f}.".format(random.uniform(1.35, 1.39)),
             " Cross-border expense reviewed; exchange rate verified.",
         ]
-        return base + random.choice(usd_choices)
+        return rec, base + random.choice(usd_choices)
     # Strengthen declined reasoning for high-value
     if status == "denied" and amount > 3000:
-        return base + f" This ${amount:,.2f} transaction far exceeds typical spend for this category."
+        return rec, base + f" This ${amount:,.2f} transaction far exceeds typical spend for this category."
 
-    return base.strip()
+    return rec, base.strip()
 
 
 def _read_and_convert_excel() -> list[dict]:
@@ -410,19 +430,20 @@ def _read_and_convert_excel() -> list[dict]:
         # Assign employee
         employee = _assign_employee(code, txn_counter)
 
-        # Determine approval status and generate reasoning
+        # Determine approval status and generate recommendation + reasoning
         if amount < 50:
             approval_status = "not_required"
+            recommendation = None
             reasoning = None
         elif amount > 2000:
             approval_status = "pending"
-            reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "pending")
+            recommendation, reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "pending")
         elif random.random() < 0.03:
             approval_status = "denied"
-            reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "denied")
+            recommendation, reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "denied")
         else:
             approval_status = "approved"
-            reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "approved")
+            recommendation, reasoning = _generate_reasoning(transaction_type, amount, merchant, country, "approved")
 
         transaction = {
             "transaction_id": f"TXN-{txn_counter}",
@@ -442,6 +463,7 @@ def _read_and_convert_excel() -> list[dict]:
             "tags": tags,
             "compliance_history": [],
             "approval_status": approval_status,
+            "recommendation": recommendation,
             "reasoning": reasoning,
             "payment_method": "corporate_card",
             "is_reimbursable": False,

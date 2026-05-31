@@ -82,33 +82,37 @@ async def create_transaction(request: CreateTransactionRequest):
 
         if request.amount < 50:
             doc["approval_status"] = "not_required"
+            doc["recommendation"] = None
             doc["reasoning"] = None
         else:
-            # All other transactions go to pending — AI gives a recommendation,
-            # human makes the final decision via the approval workflow
             doc["approval_status"] = "pending"
             if policy_violation:
-                doc["reasoning"] = f"Recommendation: Decline — {policy_violation}"
+                doc["recommendation"] = "Decline"
+                doc["reasoning"] = policy_violation
             elif matching_rules:
                 rule = matching_rules[0]
                 if rule.get("severity") == "High" and request.amount > 500:
+                    doc["recommendation"] = "Decline"
                     doc["reasoning"] = (
-                        f"Recommendation: Pending — Flagged by rule: {rule['text']}. "
+                        f"Flagged by high-severity rule: {rule['text']}. "
                         f"Transaction of ${request.amount:,.2f} at {request.merchant} requires review."
                     )
                 else:
+                    doc["recommendation"] = "Approve"
                     doc["reasoning"] = (
-                        f"Recommendation: Approve — Transaction of ${request.amount:,.2f} at {request.merchant} "
+                        f"Transaction of ${request.amount:,.2f} at {request.merchant} "
                         f"for {department}/{transaction_type} passes policy and custom rule checks."
                     )
             elif request.amount > 2000:
+                doc["recommendation"] = "Approve"
                 doc["reasoning"] = (
-                    f"Recommendation: Pending — Transaction amount of ${request.amount:,.2f} at {request.merchant} "
+                    f"Transaction amount of ${request.amount:,.2f} at {request.merchant} "
                     f"exceeds the $2,000 automatic approval threshold. Awaiting finance team review."
                 )
             else:
+                doc["recommendation"] = "Approve"
                 doc["reasoning"] = (
-                    f"Recommendation: Approve — Transaction of ${request.amount:,.2f} at {request.merchant} "
+                    f"Transaction of ${request.amount:,.2f} at {request.merchant} "
                     f"for {department}/{transaction_type} is within policy limits. Auto-approved."
                 )
 
