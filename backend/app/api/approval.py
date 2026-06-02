@@ -4,7 +4,7 @@ from collections import defaultdict
 from fastapi import APIRouter, HTTPException
 
 from app.core.database import get_collection
-from app.graph.nodes.approval_workflow import (
+from app.graph.nodes._pending_store import (
     get_pending_approvals as get_in_memory_pending,
     resume_approval,
 )
@@ -48,8 +48,8 @@ async def list_pending_approvals():
         cursor = collection.find(
             {"approval_status": "pending"},
             {"_id": 0},
-        ).sort("date", -1).limit(100)
-        db_pending = await cursor.to_list(length=100)
+        ).sort("date", -1)
+        db_pending = await cursor.to_list(length=None)
 
         seen_ids = {p["transaction_id"] for p in in_memory}
         unseen = [t for t in db_pending if t.get("transaction_id", "") not in seen_ids]

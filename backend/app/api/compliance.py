@@ -1,8 +1,9 @@
 import asyncio
 import json
 import re
-from datetime import datetime
 from typing import Any
+
+from app.core.clock import now
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException
@@ -38,12 +39,13 @@ async def compliance_scan(request: ComplianceScanRequest):
         if request.department:
             query["department"] = request.department
 
-        # Apply app-wide time range filter
+        # Apply app-wide time range filter (empty = no cutoff)
         cutoff = await get_app_cutoff_date()
-        query["date"] = {"$gte": cutoff}
+        if cutoff:
+            query["date"] = {"$gte": cutoff}
 
-        cursor = collection.find(query).limit(100)
-        transactions = await cursor.to_list(length=100)
+        cursor = collection.find(query)
+        transactions = await cursor.to_list(length=None)
 
         if not transactions:
             return ComplianceScanResponse(results={}, total_scanned=0, violations_found=0)
@@ -69,7 +71,7 @@ async def compliance_scan(request: ComplianceScanRequest):
                     {
                         "$push": {
                             "compliance_history": {
-                                "scanned_at": datetime.now(),
+                                "scanned_at": now(),
                                 "status": result.get("status"),
                                 "severity": result.get("severity"),
                                 "reasoning": result.get("reasoning"),
@@ -94,7 +96,7 @@ async def create_rule(rule: ComplianceRule):
     try:
         collection = await get_collection("custom_rules")
         doc = rule.model_dump()
-        doc["created_at"] = datetime.now()
+        doc["created_at"] = now()
 
         if doc.get("code") is None and doc.get("department"):
             from app.mappings import resolve_first_code
@@ -182,9 +184,10 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
         if cat_list:
             query["transaction_type"] = {"$in": cat_list}
 
-        # Apply app-wide time range filter — transactions outside the window are frozen
+        # Apply app-wide time range filter — empty = no cutoff
         cutoff = await get_app_cutoff_date()
-        query["date"] = {"$gte": cutoff}
+        if cutoff:
+            query["date"] = {"$gte": cutoff}
 
         cursor = collection.find(query).limit(200)
         transactions = await cursor.to_list(length=200)
@@ -220,7 +223,7 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
                         },
                         "$push": {
                             "compliance_history": {
-                                "scanned_at": datetime.now(),
+                                "scanned_at": now(),
                                 "status": "Re-evaluated",
                                 "severity": eval_result.get("severity", "Medium"),
                                 "reasoning": f"New rule triggered: {rule_text}. {new_reasoning}",
@@ -238,7 +241,7 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
                         "$set": {"reasoning": update_reasoning, "recommendation": existing_rec},
                         "$push": {
                             "compliance_history": {
-                                "scanned_at": datetime.now(),
+                                "scanned_at": now(),
                                 "status": "Re-evaluated",
                                 "severity": eval_result.get("severity", "Medium"),
                                 "reasoning": f"New rule triggered: {rule_text}. {new_reasoning}",
@@ -253,7 +256,7 @@ async def _reevaluate_matching_transactions(rule_text: str, department: str, cat
                         "$set": {"reasoning": new_reasoning, "recommendation": "Decline"},
                         "$push": {
                             "compliance_history": {
-                                "scanned_at": datetime.now(),
+                                "scanned_at": now(),
                                 "status": "Re-evaluated",
                                 "severity": eval_result.get("severity", "Medium"),
                                 "reasoning": f"Re-evaluated against new rule: {rule_text}. {new_reasoning}",
@@ -270,56 +273,59 @@ async def _evaluate_against_rule(
     transactions: list[dict],
     rule_text: str,
 ) -> dict[str, dict[str, Any]]:
-    """Use Gemini to batch-check if transactions violate the new rule."""
+    """Use Gemini to batch-check if transactions violate the new rule.
+
+    Processes all transaction batches in parallel for speed.
+    """
     if genai is None or not transactions:
         return {}
 
-    try:
-        client = genai.Client(api_key=settings.gemini_api_key)
+    client = genai.Client(api_key=settings.gemini_api_key)
+    BATCH_SIZE = 30
 
-        # Batch transactions — send up to 30 per call
-        BATCH_SIZE = 30
-        results: dict[str, dict[str, Any]] = {}
-
-        for i in range(0, len(transactions), BATCH_SIZE):
-            batch = transactions[i:i + BATCH_SIZE]
-            batch_json = []
-            for txn in batch:
-                batch_json.append({
-                    "transaction_id": txn.get("transaction_id", ""),
-                    "merchant": txn.get("merchant", ""),
-                    "amount": txn.get("amount", 0),
-                    "department": txn.get("department", ""),
-                    "transaction_type": txn.get("transaction_type", ""),
-                    "date": str(txn.get("date", "")),
-                    "current_status": txn.get("approval_status", ""),
-                })
-
-            prompt = (
-                f"You are evaluating transactions against a new company policy rule.\n\n"
-                f"New Rule: \"{rule_text}\"\n\n"
-                f"For each transaction, determine if it VIOLATES this new rule.\n"
-                f"Be strict — if the transaction clearly violates the rule, flag it.\n\n"
-                f"Respond with a JSON array of only the violations:\n"
-                f"[{{\"transaction_id\":\"...\", \"status\":\"Violation\", \"severity\":\"Low\"|\"Medium\"|\"High\", "
-                f"\"recommendation\":\"Decline\", "
-                f"\"reasoning\":\"<explanation>\"}}]\n\n"
-                f"Return an empty array [] if none violate.\n\n"
-                f"Transactions:\n{json.dumps(batch_json, default=str)}"
-            )
-
+    async def _evaluate_batch(batch: list[dict]) -> list[dict]:
+        batch_json = [
+            {
+                "transaction_id": t.get("transaction_id", ""),
+                "merchant": t.get("merchant", ""),
+                "amount": t.get("amount", 0),
+                "department": t.get("department", ""),
+                "transaction_type": t.get("transaction_type", ""),
+                "date": str(t.get("date", "")),
+                "current_status": t.get("approval_status", ""),
+            }
+            for t in batch
+        ]
+        prompt = (
+            f"You are evaluating transactions against a new company policy rule.\n\n"
+            f"New Rule: \"{rule_text}\"\n\n"
+            f"For each transaction, determine if it VIOLATES this new rule.\n"
+            f"Be strict — if the transaction clearly violates the rule, flag it.\n\n"
+            f"Respond with a JSON array of only the violations:\n"
+            f"[{{\"transaction_id\":\"...\", \"status\":\"Violation\", \"severity\":\"Low\"|\"Medium\"|\"High\", "
+            f"\"recommendation\":\"Decline\", "
+            f"\"reasoning\":\"<explanation>\"}}]\n\n"
+            f"Return an empty array [] if none violate.\n\n"
+            f"Transactions:\n{json.dumps(batch_json, default=str)}"
+        )
+        try:
             response = client.models.generate_content(
                 model=settings.gemini_model,
                 contents=prompt,
             )
-            parsed = _parse_violation_array(response.text)
-            for p in parsed:
-                results[p["transaction_id"]] = p
+            return _parse_violation_array(response.text)
+        except Exception:
+            return []
 
-        return results
+    # Fire all batches in parallel
+    batches = [transactions[i:i + BATCH_SIZE] for i in range(0, len(transactions), BATCH_SIZE)]
+    batch_results = await asyncio.gather(*[_evaluate_batch(b) for b in batches])
 
-    except Exception:
-        return {}
+    results: dict[str, dict[str, Any]] = {}
+    for parsed in batch_results:
+        for p in parsed:
+            results[p["transaction_id"]] = p
+    return results
 
 
 def _parse_violation_array(text: str) -> list[dict]:

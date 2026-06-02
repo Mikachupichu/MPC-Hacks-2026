@@ -3,8 +3,9 @@
 import asyncio
 import os
 import random
-from datetime import datetime
 from pathlib import Path
+
+from app.core.clock import now
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -214,7 +215,7 @@ async def seed_custom_rules(db):
     ]
 
     for rule in rules:
-        rule["created_at"] = datetime.now()
+        rule["created_at"] = now()
 
     await collection.insert_many(rules)
     print(f"  ✓ Seeded {len(rules)} custom rules with code/department/category references (no embeddings)")

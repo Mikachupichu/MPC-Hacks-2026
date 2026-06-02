@@ -2,7 +2,7 @@ from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 
 from app.core.database import get_collection
-from app.graph.nodes.report_compiler import report_compiler_node
+from app.graph.graph import get_graph
 from app.graph.state import GraphState
 from app.schemas.report import ReportRequest, ReportResponse
 
@@ -35,7 +35,6 @@ async def compile_report(request: ReportRequest):
         if not transactions:
             return ReportResponse(report_payload={}, error="No transactions found matching criteria")
 
-        # Convert ObjectId to string
         for t in transactions:
             if "_id" in t and isinstance(t["_id"], ObjectId):
                 t["_id"] = str(t["_id"])
@@ -50,9 +49,11 @@ async def compile_report(request: ReportRequest):
             pending_approval=None,
             user_query="report",
             error=None,
+            task_type="report",
         )
 
-        result = await report_compiler_node(state)
+        graph = get_graph()
+        result = await graph.ainvoke(state)
 
         return ReportResponse(
             report_payload=result.get("report_payload", {}),

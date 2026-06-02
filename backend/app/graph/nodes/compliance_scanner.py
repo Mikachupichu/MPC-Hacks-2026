@@ -1,3 +1,5 @@
+"""Compliance scanner node — policy evaluation with optional human-in-the-loop approval."""
+
 import asyncio
 import json
 import re
@@ -12,6 +14,10 @@ try:
 except ImportError:
     genai = None
 
+try:
+    from langgraph.types import Command
+except ImportError:
+    Command = None
 
 COMPLIANCE_SYSTEM_PROMPT = """You are an AI compliance officer for SMB expense management. Evaluate transactions against company policy and flag violations with contextual reasoning.
 
@@ -44,8 +50,126 @@ IMPORTANT: The "recommendation" field is the AI agent's independent recommendati
 """
 
 
+async def _fetch_employee_context(employee: str) -> dict:
+    """Fetch employee YTD spend and transaction history."""
+    if not employee:
+        return {}
+    try:
+        collection = await get_collection("transactions")
+        emp_txns = (
+            await collection.find(
+                {"employee": employee},
+                {"_id": 0, "transaction_id": 1, "amount": 1, "merchant": 1, "date": 1},
+            )
+            .sort("date", -1)
+            .to_list(500)
+        )
+        total_spent = sum(t.get("amount", 0) for t in emp_txns)
+        return {
+            "employee": employee,
+            "total_spent_ytd": round(total_spent, 2),
+            "transaction_count": len(emp_txns),
+            "recent_transactions": emp_txns[:5],
+        }
+    except Exception:
+        return {"employee": employee, "error": "Could not fetch history"}
+
+
+async def _fetch_department_context(department: str) -> dict:
+    """Fetch department YTD spend and budget."""
+    if not department:
+        return {}
+    try:
+        txns_col = await get_collection("transactions")
+        dept_txns = (
+            await txns_col.find(
+                {"department": department},
+                {"_id": 0, "amount": 1, "date": 1},
+            )
+            .to_list(1000)
+        )
+        dept_total = sum(t.get("amount", 0) for t in dept_txns)
+
+        budget = None
+        try:
+            budget_col = await get_collection("department_budgets")
+            budget_doc = await budget_col.find_one({"department": department}, {"_id": 0})
+            budget = budget_doc
+        except Exception:
+            pass
+
+        months = len(set(str(t.get("date", ""))[:7] for t in dept_txns if t.get("date")))
+        monthly_avg = round(dept_total / max(months, 1), 2)
+
+        dept_ctx = {
+            "department": department,
+            "total_spent_ytd": round(dept_total, 2),
+            "monthly_avg_spend": monthly_avg,
+            "transaction_count": len(dept_txns),
+        }
+        if budget:
+            dept_ctx["annual_budget"] = budget.get("annual_budget")
+            dept_ctx["monthly_budget"] = budget.get("monthly_budget")
+            dept_ctx["budget_remaining"] = round(budget.get("annual_budget", 0) - dept_total, 2)
+            dept_ctx["budget_used_pct"] = round(
+                (dept_total / max(budget.get("annual_budget", 1), 1)) * 100, 1
+            )
+        return dept_ctx
+    except Exception:
+        return {"department": department, "error": "Could not fetch budget data"}
+
+
+BATCH_SIZE = 20
+
+
+async def _evaluate_batch(
+    batch: list[tuple[dict[str, Any], str]],
+    policy_text: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Evaluate a batch of transactions in a single Gemini call."""
+    if genai is None:
+        return [(t.get("transaction_id", str(t.get("_id", ""))), _default_compliance(t)) for t, _ in batch]
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    txns_json = []
+    for txn, rules_str in batch:
+        txn_clean = {k: v for k, v in txn.items() if k not in ("_id", "items", "notes", "compliance_history")}
+        txn_clean["_matched_rules"] = rules_str[:300]
+        txns_json.append(txn_clean)
+
+    prompt = (
+        f"{COMPLIANCE_SYSTEM_PROMPT.format(policy_text=policy_text, custom_rules='See _matched_rules per transaction below.')}\n\n"
+        f"Evaluate these {len(batch)} transactions:\n"
+        f"{json.dumps(txns_json, default=str)}\n\n"
+        "Respond with a JSON array of results, one entry per transaction."
+    )
+
+    try:
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(model=settings.gemini_model, contents=prompt),
+            timeout=60,
+        )
+        parsed = _parse_compliance_array(response.text)
+        results = []
+        for txn, _ in batch:
+            txn_id = txn.get("transaction_id", str(txn.get("_id", "")))
+            match = next((p for p in parsed if p.get("transaction_id") == txn_id), None)
+            if match:
+                results.append((txn_id, match))
+            else:
+                results.append((txn_id, _default_compliance(txn)))
+        return results
+    except Exception:
+        return [(t.get("transaction_id", str(t.get("_id", ""))), _default_compliance(t)) for t, _ in batch]
+
+
 async def compliance_scanner_node(state: GraphState) -> dict[str, Any]:
-    """Centralized evaluation engine using code/department-based rule matching."""
+    """Evaluate transactions against policy — may interrupt for human approval.
+
+    When ``task_type`` is ``"approval"`` and violations are found, the node
+    pauses the graph via ``Command(interrupt=…)`` so a manager can decide.
+    The compliance endpoint (``task_type="compliance"``) never interrupts.
+    """
     transactions = state.get("current_transactions", [])
     if not transactions:
         return {"compliance_results": {}, "error": "No transactions to evaluate"}
@@ -54,23 +178,23 @@ async def compliance_scanner_node(state: GraphState) -> dict[str, Any]:
         policy_doc = await _fetch_policy()
         policy_text = _format_policy_text(policy_doc) if policy_doc else "No policy found."
 
-        # Match rules by code and department instead of vector search
         async def _get_rules_for_txn(txn: dict) -> str:
             return await _match_rules_by_code(txn)
 
         rules_tasks = [_get_rules_for_txn(t) for t in transactions]
         rules_results = await asyncio.gather(*rules_tasks)
 
-        async def _evaluate(txn: dict, rules_str: str) -> dict:
-            return await _evaluate_single(txn, policy_text, rules_str)
-
-        eval_tasks = [_evaluate(t, r) for t, r in zip(transactions, rules_results)]
-        eval_results = await asyncio.gather(*eval_tasks)
+        # Batch transactions into groups and evaluate each batch in parallel
+        pairs = list(zip(transactions, rules_results))
+        batches = [pairs[i:i + BATCH_SIZE] for i in range(0, len(pairs), BATCH_SIZE)]
+        batch_results = await asyncio.gather(*[_evaluate_batch(b, policy_text) for b in batches], return_exceptions=True)
 
         compliance_results: dict[str, dict[str, Any]] = {}
-        for txn, result in zip(transactions, eval_results):
-            txn_id = txn.get("transaction_id", txn.get("_id", str(txn)))
-            compliance_results[str(txn_id)] = result
+        for br in batch_results:
+            if isinstance(br, Exception):
+                continue
+            for txn_id, comp in br:
+                compliance_results[str(txn_id)] = comp
 
         # Post-process: detect repeat offenders by employee
         employee_violations: dict[str, list[str]] = {}
@@ -82,15 +206,69 @@ async def compliance_scanner_node(state: GraphState) -> dict[str, Any]:
 
         for emp, txn_ids in employee_violations.items():
             if len(txn_ids) >= 2:
-                for txn_id in txn_ids:
-                    result = compliance_results.get(txn_id, {})
-                    repeat_count = txn_ids.index(txn_id) + 1
-                    existing = result.get("reasoning", "")
-                    result["reasoning"] = f"[Repeat offender: {repeat_count}/{len(txn_ids)} violation{'' if len(txn_ids) == 1 else 's'} for {emp}] {existing}"
-                    result["severity"] = "High"
-                    compliance_results[txn_id] = result
+                for idx, txn_id in enumerate(txn_ids, 1):
+                    existing = compliance_results[txn_id].get("reasoning", "")
+                    compliance_results[txn_id]["reasoning"] = (
+                        f"[Repeat offender: {idx}/{len(txn_ids)} "
+                        f"violation{'s' if len(txn_ids) != 1 else ''} for {emp}] {existing}"
+                    )
+                    compliance_results[txn_id]["severity"] = "High"
 
-        return {"compliance_results": compliance_results}
+        output: dict[str, Any] = {"compliance_results": compliance_results}
+
+        # Human-in-the-loop: only when explicitly invoked as an approval flow
+        task_type = state.get("task_type", "")
+        if task_type == "approval":
+            violations = {
+                tid: r
+                for tid, r in compliance_results.items()
+                if r.get("status") == "Violation"
+            }
+            if violations:
+                txn_id, comp_result = next(iter(violations.items()))
+                txn = next(
+                    t for t in transactions if t.get("transaction_id") == txn_id
+                )
+                txn_id_label = txn.get("transaction_id", str(txn.get("_id", "unknown")))
+                employee_context = await _fetch_employee_context(txn.get("employee", ""))
+                dept_context = await _fetch_department_context(txn.get("department", ""))
+
+                if not comp_result.get("recommendation"):
+                    comp_result["recommendation"] = (
+                        "Decline" if comp_result.get("status") == "Violation" else "Approve"
+                    )
+
+                approval_packet = {
+                    "transaction_id": txn_id_label,
+                    "transaction": txn,
+                    "status": "pending",
+                    "compliance_results": comp_result,
+                    "employee_context": employee_context,
+                    "department_context": dept_context,
+                }
+
+                # Keep in-memory store so GET /api/approve/pending works
+                from app.graph.nodes._pending_store import _pending_approvals
+
+                _pending_approvals[txn_id_label] = approval_packet
+
+                # Update state AND pause for human decision
+                output["pending_approval"] = approval_packet
+                output["messages"] = list(state.get("messages", [])) + [
+                    {
+                        "role": "assistant",
+                        "content": f"Approval request created for transaction {txn_id_label}. "
+                        f"Waiting for manager decision.",
+                    }
+                ]
+
+                if Command is not None:
+                    return Command(
+                        update=output,
+                        interrupt=approval_packet,
+                    )
+
+        return output
 
     except Exception as e:
         return {"compliance_results": {}, "error": f"Compliance scan failed: {str(e)}"}
@@ -99,17 +277,22 @@ async def compliance_scanner_node(state: GraphState) -> dict[str, Any]:
 async def evaluate_transactions(
     transactions: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Reusable entry point for compliance evaluation from other nodes."""
-    return (await compliance_scanner_node({
-        "messages": [],
-        "current_transactions": transactions,
-        "compliance_results": {},
-        "report_payload": {},
-        "pending_approval": None,
-        "user_query": None,
-        "conversation_id": None,
-        "error": None,
-    })).get("compliance_results", {})
+    """Reusable entry point for compliance evaluation — no interrupt (safe for sub-graph use)."""
+    return (
+        await compliance_scanner_node(
+            {
+                "messages": [],
+                "current_transactions": transactions,
+                "compliance_results": {},
+                "report_payload": {},
+                "pending_approval": None,
+                "user_query": None,
+                "conversation_id": None,
+                "error": None,
+                "task_type": "compliance",
+            }
+        )
+    ).get("compliance_results", {})
 
 
 async def _fetch_policy() -> dict | None:
@@ -141,16 +324,11 @@ async def _match_rules_by_code(transaction: dict) -> str:
 
         query: dict[str, Any] = {"$or": []}
 
-        # Match by transaction code (most specific)
         if txn_code:
             query["$or"].append({"code": txn_code})
-
-        # Match by department
         if txn_dept:
             query["$or"].append({"department": txn_dept})
             query["$or"].append({"department": "all"})
-
-        # Match by category/type
         if txn_type:
             query["$or"].append({"category": txn_type})
             query["$or"].append({"category": "all"})
@@ -158,64 +336,34 @@ async def _match_rules_by_code(transaction: dict) -> str:
         if not query["$or"]:
             query = {"$or": [{"department": "all"}]}
 
-        cursor = collection.find(query, {"_id": 0, "text": 1, "department": 1, "category": 1, "code": 1, "severity": 1}).limit(10)
+        cursor = collection.find(
+            query, {"_id": 0, "text": 1, "department": 1, "category": 1, "code": 1, "severity": 1}
+        ).limit(10)
         rules = await cursor.to_list(length=10)
         return json.dumps(rules, default=str) if rules else "No matching rules found."
     except Exception:
         return "Rule search unavailable."
 
 
-async def _evaluate_single(
-    transaction: dict,
-    policy_text: str,
-    custom_rules: str,
-) -> dict:
-    """Evaluate a single transaction through Gemini."""
-    try:
-        if genai is None:
-            return _default_compliance(transaction)
-
-        client = genai.Client(api_key=settings.gemini_api_key)
-
-        txn_str = json.dumps(
-            {k: v for k, v in transaction.items() if k not in ("_id", "items", "notes", "compliance_history")},
-            default=str,
-        )
-
-        prompt = (
-            f"{COMPLIANCE_SYSTEM_PROMPT.format(policy_text=policy_text, custom_rules=custom_rules)}\n\n"
-            f"Evaluate this single transaction:\n{txn_str}\n\n"
-            "Respond with the JSON object for this transaction only, not an array."
-        )
-
-        response = client.models.generate_content(
-            model=settings.gemini_model, contents=prompt
-        )
-
-        return _parse_compliance_json(response.text, transaction)
-
-    except Exception as e:
-        return _default_compliance(transaction, error=str(e))
-
-
-def _parse_compliance_json(text: str, transaction: dict) -> dict:
-    json_match = re.search(r"\[.*?\]", text, re.DOTALL)
+def _parse_compliance_array(text: str) -> list[dict]:
+    """Parse a JSON array from Gemini's batch evaluation response."""
+    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if json_match:
         try:
-            arr = json.loads(json_match.group(0))
-            if arr and isinstance(arr, list):
-                return arr[0]
+            arr = json.loads(json_match.group(1))
+            if isinstance(arr, list):
+                return arr
         except json.JSONDecodeError:
             pass
-
-    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if brace_match:
+    array_match = re.search(r"\[.*?\]", text, re.DOTALL)
+    if array_match:
         try:
-            return json.loads(brace_match.group(0))
+            arr = json.loads(array_match.group(0))
+            if isinstance(arr, list):
+                return arr
         except json.JSONDecodeError:
             pass
-
-    return _default_compliance(transaction)
+    return []
 
 
 def _default_compliance(transaction: dict, error: str = "") -> dict:

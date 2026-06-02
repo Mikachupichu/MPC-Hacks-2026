@@ -40,7 +40,8 @@ The transactions collection schema:
 - original_transaction_code: integer
 
 AVAILABLE DATA FACTS (IMPORTANT - use these to answer accurately):
-- Date range of data: August 2025 to March 2026 (NOT 2023 or 2024)
+- Date range of data: August 2025 to May 2026
+- Today's date: May 31st, 2026
 - Two departments: Operations (fleet/trucking company — most data), Finance (bill payments, fees)
 - Transaction codes 3001/3006 are Operations fleet card (fuel, permits, tolls, maintenance)
 - Transaction code 3005 is Operations — cash advances for drivers
@@ -58,7 +59,7 @@ Your tasks:
 
 Rules:
 - Use $match, $group, $sort, $project, $limit, $unwind, $dateToString as needed.
-- For date ranges use ISO strings with $gte/$lte: "2025-08-01"
+- For date ranges use ISO strings with $gte/$lte: "2026-05-01"
 - For department/category comparisons, include ALL groups to show comparison context.
 - ALWAYS limit results to a reasonable number (max 20 items for charts).
 
@@ -92,10 +93,19 @@ _conversations: dict[str, list[dict[str, str]]] = {}
 
 
 async def conversational_analyst_node(state: GraphState) -> dict[str, Any]:
-    """Handles conversational Text-to-MQL with memory of prior exchanges."""
+    """Handles conversational Text-to-MQL with memory of prior exchanges.
+
+    When ``task_type`` is set to a non-chat flow (compliance, report, approval),
+    this node is a no-op pass-through — the graph router handles routing.
+    """
     messages = state.get("messages", [])
     user_query = state.get("user_query", "")
     conversation_id = state.get("conversation_id", "")
+    task_type = state.get("task_type", "")
+
+    # Pass through for non-chat task types — routing is handled by the graph
+    if task_type and task_type != "chat":
+        return {"messages": messages, "conversation_id": conversation_id}
 
     if not user_query and messages:
         last_msg = messages[-1]
@@ -160,7 +170,7 @@ async def conversational_analyst_node(state: GraphState) -> dict[str, Any]:
     if not data and pipeline:
         explanation = (
             f"I couldn't find any transactions matching that criteria. "
-            f"Our data covers August 2025 through March 2026. "
+            f"Our data covers August 2025 through May 2026. "
             f"Try asking about a different time period, department, or category."
         )
         viz_type = "text"

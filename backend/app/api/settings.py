@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 class TimeRangeRequest(BaseModel):
-    months: int = Field(ge=1, le=12)
+    months: int = Field(ge=0, le=12)
 
 
 class TimeRangeResponse(BaseModel):

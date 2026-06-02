@@ -1,9 +1,8 @@
 import json
 import re
-from collections import Counter
-from datetime import datetime
 from typing import Any
 
+from app.core.clock import now
 from app.core.config import settings
 from app.core.time_range import get_app_cutoff_date
 from app.graph.state import GraphState
@@ -49,7 +48,8 @@ async def report_compiler_node(state: GraphState) -> dict[str, Any]:
         audit_sample = (approved_sample + denied_sample)[:10]
         if audit_sample:
             from app.core.database import get_collection
-            audit_results = await _audit_transactions(audit_sample)
+            from app.graph.nodes.compliance_scanner import evaluate_transactions
+            audit_results = await evaluate_transactions(audit_sample)
             for txn_id, result in audit_results.items():
                 if txn_id in compliance_results:
                     compliance_results[txn_id] = result
@@ -64,14 +64,14 @@ async def report_compiler_node(state: GraphState) -> dict[str, Any]:
                                 await collection.update_one(
                                     {"transaction_id": txn_id},
                                     {"$set": {"approval_status": "pending", "recommendation": new_rec, "reasoning": new_reasoning},
-                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously approved but now recommends {new_rec}."}}}
+                                     "$push": {"compliance_history": {"scanned_at": now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously approved but now recommends {new_rec}."}}}
                                 )
                             elif new_rec and new_rec != "Decline" and old_status == "denied":
                                 collection = await get_collection("transactions")
                                 await collection.update_one(
                                     {"transaction_id": txn_id},
                                     {"$set": {"approval_status": "pending", "recommendation": new_rec, "reasoning": new_reasoning},
-                                     "$push": {"compliance_history": {"scanned_at": datetime.now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously denied but now recommends {new_rec}."}}}
+                                     "$push": {"compliance_history": {"scanned_at": now(), "status": "Re-evaluated", "severity": "High", "reasoning": f"Audit: previously denied but now recommends {new_rec}."}}}
                                 )
                             break
 
@@ -162,71 +162,6 @@ def _parse_report_json(text: str) -> dict | None:
     return None
 
 
-async def _audit_transactions(transactions: list[dict]) -> dict[str, dict[str, Any]]:
-    """Re-evaluate a sample of transactions against company policy via Gemini."""
-    try:
-        from google import genai
-        if genai is None:
-            return {}
-
-        client = genai.Client(api_key=settings.gemini_api_key)
-        results: dict[str, dict[str, Any]] = {}
-
-        batch_json = [
-            {
-                "transaction_id": t.get("transaction_id", ""),
-                "merchant": t.get("merchant", ""),
-                "amount": t.get("amount", 0),
-                "department": t.get("department", ""),
-                "transaction_type": t.get("transaction_type", ""),
-                "current_status": t.get("approval_status", ""),
-                "current_reasoning": t.get("reasoning", ""),
-                "current_recommendation": t.get("recommendation"),
-                "current_status": t.get("approval_status", ""),
-            }
-            for t in transactions
-        ]
-
-        prompt = (
-            "You are a policy auditor double-checking expense transactions. "
-            "Review each transaction against standard expense policy (all expenses over $50 need receipts, "
-            "transactions over $2000 need approval, any transaction over $10000 needs CFO approval).\n\n"
-            "For each transaction, decide if the current decision was correct. "
-            "If you disagree, set status to 'Violation' and provide your new recommendation.\n\n"
-            "Respond with a JSON array. Only include transactions where you disagree:\n"
-            "[{\"transaction_id\":\"...\", \"status\":\"Violation\", \"severity\":\"Low\"|\"Medium\"|\"High\", "
-            "\"recommendation\":\"Approve\"|\"Decline\", "
-            "\"reasoning\":\"<explanation of why the previous decision was wrong>\"}]\n\n"
-            "Return [] if all decisions are correct."
-        )
-
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=f"{prompt}\n\nTransactions to audit:\n{json.dumps(batch_json, default=str)}",
-        )
-
-        array_match = re.search(r"\[.*?\]", response.text, re.DOTALL)
-        if array_match:
-            try:
-                arr = json.loads(array_match.group(0))
-                for item in arr:
-                    if isinstance(item, dict) and item.get("status") == "Violation":
-                        tid = item["transaction_id"]
-                        results[tid] = {
-                            "transaction_id": tid,
-                            "status": "Violation",
-                            "severity": item.get("severity", "Medium"),
-                            "recommendation": item.get("recommendation", "Decline"),
-                            "reasoning": item.get("reasoning", "Re-evaluated and flagged."),
-                        }
-            except json.JSONDecodeError:
-                pass
-
-        return results
-    except Exception:
-        return {}
-
-
 def _build_aggregated_report(
     transactions: list[dict[str, Any]],
     compliance_results: dict[str, dict[str, Any]],
@@ -278,7 +213,7 @@ def _build_aggregated_report(
 
     return {
         "report_title": "Expense Summary Report",
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": now().isoformat(),
         "executive_summary": {
             "text": (
                 f"Analysis of {total_txns} transactions totaling ${total_spent:,.2f}. "

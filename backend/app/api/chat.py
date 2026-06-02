@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
-from app.graph.nodes.conversational_analyst import conversational_analyst_node
+from app.graph.graph import get_graph
 from app.graph.state import GraphState
 from app.schemas.chat import ChatRequest, ChatResponse, VisualizationConfig
 
@@ -25,9 +25,11 @@ async def chat_endpoint(request: ChatRequest):
             user_query=request.message,
             conversation_id=conversation_id,
             error=None,
+            task_type="chat",
         )
 
-        result = await conversational_analyst_node(state)
+        graph = get_graph()
+        result = await graph.ainvoke(state)
         messages = result.get("messages", [])
         last_msg = messages[-1] if messages else {}
         content = last_msg.get("content", {})
@@ -71,9 +73,11 @@ async def chat_stream_endpoint(request: ChatRequest):
                 user_query=request.message,
                 conversation_id=conversation_id,
                 error=None,
+                task_type="chat",
             )
 
-            result = await conversational_analyst_node(state)
+            graph = get_graph()
+            result = await graph.ainvoke(state)
             messages = result.get("messages", [])
             last_msg = messages[-1] if messages else {}
             content = last_msg.get("content", {})
@@ -86,7 +90,6 @@ async def chat_stream_endpoint(request: ChatRequest):
                     "conversation_id": conversation_id,
                     **content,
                 }
-                # Remove non-serializable keys
                 payload.pop("_default_str", None)
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
 

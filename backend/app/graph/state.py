@@ -14,3 +14,4 @@ class GraphState(TypedDict):
     user_query: str | None
     conversation_id: str | None
     error: str | None
+    task_type: str | None
