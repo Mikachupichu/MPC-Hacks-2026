@@ -13,7 +13,7 @@ export default function ChatDashboard() {
     {
       role: "assistant",
       content:
-        "Hi! I'm your expense intelligence assistant. Ask me anything about your company's spending — for example:\n\n- What did Operations spend on fuel?\n- Show me spending by department\n- What are the top permit fees this month?\n- Compare spending across transaction types",
+        "Hi! I'm your expense intelligence assistant. Ask me anything about your company's spending — for example:\n\n- What did Operations spend on fuel?\n- Show me spending by department\n- What are the top permit fees in March 2026?\n- Compare spending across transaction types",
     },
   ]);
   const [input, setInput] = useState("");

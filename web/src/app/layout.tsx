@@ -15,8 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Expense Intelligence - MPC Hacks 2026",
+  title: "Aero Intel - MPC Hacks 2026",
   description: "AI-powered expense intelligence for SMBs",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+  },
 };
 
 export default function RootLayout({

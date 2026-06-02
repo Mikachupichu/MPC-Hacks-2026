@@ -33,6 +33,8 @@ const CATEGORY_TYPE_MAP: Record<number, string> = {
   19: "Payment",
 };
 
+let txnCounter = 0;
+
 export default function TransactionForm() {
   const [department, setDepartment] = useState("Operations");
   const [transactionCategory, setTransactionCategory] = useState<number>(1);
@@ -55,11 +57,12 @@ export default function TransactionForm() {
 
     setSubmitting(true);
     try {
-      const txnId = `TXN-MANUAL-${Date.now()}`;
+      txnCounter++;
+      const txnId = `TXN-MANUAL-20260531-${txnCounter}`;
       const result = await createTransaction({
         transaction_id: txnId,
         transaction_code: transactionCode,
-        date: new Date().toISOString().split("T")[0],
+        date: "2026-05-31",
         merchant: merchant.trim(),
         amount,
         currency,

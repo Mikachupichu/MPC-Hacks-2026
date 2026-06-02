@@ -178,9 +178,9 @@ export default function VisualBubble({ title, visualizationType, config, data }:
                 padding={chartPadding}
                 allowDecimals={false}
                 customTooltip={ChartTooltip}
-                showGradient
+                showGradient={!isSingleCategory}
                 curveType="natural"
-                stack
+                stack={!isSingleCategory}
               />
             </div>
           </Card>

@@ -33,6 +33,7 @@ const TIME_RANGE_OPTIONS = [
   { value: 4, label: "Past 4 Months" },
   { value: 8, label: "Past 8 Months" },
   { value: 12, label: "Past Year" },
+  { value: 0, label: "No Range" },
 ];
 
 export default function AdminPage() {
@@ -83,7 +84,7 @@ export default function AdminPage() {
         `Scan complete: ${result.violations_found} violations out of ${result.total_scanned} transactions`
       );
     } catch (err) {
-      toast.error("Scan failed. Is the database seeded?");
+      toast.error(err instanceof Error ? err.message : "Scan failed");
     } finally {
       setScanning(false);
     }

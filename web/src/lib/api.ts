@@ -12,35 +12,25 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const REQUEST_TIMEOUT = 30_000; // 30 seconds
-
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-
   const url = `${API_BASE}/api${path}`;
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-      signal: controller.signal,
-      ...options,
-    });
+  const res = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+    ...options,
+  });
 
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`API error ${res.status}: ${error}`);
-    }
-
-    return res.json();
-  } finally {
-    clearTimeout(timeoutId);
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`API error ${res.status}: ${error}`);
   }
+
+  return res.json();
 }
 
 // Feature 1: Chat

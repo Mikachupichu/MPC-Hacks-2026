@@ -220,8 +220,8 @@ body {
 
 /*
   Tremor chart color safelist — Tremor builds class names like "fill-blue-500"
-  "dark:fill-blue-500" dynamically in JS. Tailwind v4 JIT can't detect these,
-  so they must be explicitly declared here or chart segments appear all black.
+  "stroke-blue-500" dynamically in JS. Tailwind v4 JIT can't detect these,
+  so they must be explicitly declared here or chart segments appear invisible.
 */
 @layer base {
   .fill-blue-500, .dark\:fill-blue-500 { fill: #3b82f6; }
@@ -243,6 +243,26 @@ body {
   .fill-pink-500, .dark\:fill-pink-500 { fill: #ec4899; }
   .fill-gray-500, .dark\:fill-gray-500 { fill: #6b7280; }
   .fill-slate-500, .dark\:fill-slate-500 { fill: #64748b; }
+
+  .stroke-blue-500, .dark\:stroke-blue-500 { stroke: #3b82f6; }
+  .stroke-cyan-500, .dark\:stroke-cyan-500 { stroke: #06b6d4; }
+  .stroke-sky-500, .dark\:stroke-sky-500 { stroke: #0ea5e9; }
+  .stroke-indigo-500, .dark\:stroke-indigo-500 { stroke: #6366f1; }
+  .stroke-violet-500, .dark\:stroke-violet-500 { stroke: #8b5cf6; }
+  .stroke-purple-500, .dark\:stroke-purple-500 { stroke: #a855f7; }
+  .stroke-fuchsia-500, .dark\:stroke-fuchsia-500 { stroke: #d946ef; }
+  .stroke-amber-500, .dark\:stroke-amber-500 { stroke: #f59e0b; }
+  .stroke-emerald-500, .dark\:stroke-emerald-500 { stroke: #10b981; }
+  .stroke-orange-500, .dark\:stroke-orange-500 { stroke: #f97316; }
+  .stroke-rose-500, .dark\:stroke-rose-500 { stroke: #f43f5e; }
+  .stroke-teal-500, .dark\:stroke-teal-500 { stroke: #14b8a6; }
+  .stroke-green-500, .dark\:stroke-green-500 { stroke: #22c55e; }
+  .stroke-lime-500, .dark\:stroke-lime-500 { stroke: #84cc16; }
+  .stroke-yellow-500, .dark\:stroke-yellow-500 { stroke: #eab308; }
+  .stroke-red-500, .dark\:stroke-red-500 { stroke: #ef4444; }
+  .stroke-pink-500, .dark\:stroke-pink-500 { stroke: #ec4899; }
+  .stroke-gray-500, .dark\:stroke-gray-500 { stroke: #6b7280; }
+  .stroke-slate-500, .dark\:stroke-slate-500 { stroke: #64748b; }
 }
 
 /* Windows 7 Aero Glass Window CSS */
