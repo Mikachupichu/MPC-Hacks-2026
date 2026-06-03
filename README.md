@@ -1,6 +1,9 @@
 # MPC Hacks 2026
 
-A hackathon project built with Next.js, React, TypeScript, shadcn/ui, Tremor, MongoDB, and Python.
+A hackathon project built with Next.js, React, TypeScript, shadcn/ui, Tremor, MongoDB, and Python.  
+Aero Intel turns messy company spending into conversational charts, detailed financial reporting, agentic scans for policy violations, and a one-click dashboard to approve employee spending requests.  
+Find out more: https://devpost.com/software/aero-intel
+Try it out: https://mpc-hacks-2026.vercel.app/reports
 
 ## Tech Stack
 
